@@ -6,6 +6,22 @@ from config import (THRESHOLDS, ENTITY_MAP, NIGHT_HOURS, MIN_HEAT_FREQ, MIN_POWE
                     SPECIFIC_HEAT_CAPACITY, PHYSICS_THRESHOLDS, SENSOR_FALLBACKS)
 from utils import safe_div, availability_pct
 
+def apply_sensor_fallbacks(df):
+    """
+    Fills gaps in Primary sensors using Backup sensors defined in SENSOR_FALLBACKS.
+    """
+    d = df.copy()
+    for prim, back in SENSOR_FALLBACKS.items():
+        # Only proceed if the backup sensor actually exists in this dataset
+        if back in d.columns:
+            # Case 1: Primary column missing entirely? Create it from backup.
+            if prim not in d.columns:
+                d[prim] = d[back]
+            else:
+                # Case 2: Primary exists but has gaps (NaNs). Fill them.
+                d[prim] = d[prim].fillna(d[back])
+    return d
+
 def calculate_physics_metrics(df):
     """
     Overwrites imported 'Heat' and 'DeltaT' columns with Python-calculated values.
@@ -50,22 +66,6 @@ def calculate_physics_metrics(df):
     
     return d
 
-def apply_sensor_fallbacks(df):
-    """
-    Fills gaps in Primary sensors using Backup sensors defined in SENSOR_FALLBACKS.
-    """
-    d = df.copy()
-    for prim, back in SENSOR_FALLBACKS.items():
-        # Only proceed if the backup sensor actually exists in this dataset
-        if back in d.columns:
-            # If primary column is missing entirely, create it from backup
-            if prim not in d.columns:
-                d[prim] = d[back]
-            else:
-                # If primary exists, fill any NaNs with backup data
-                d[prim] = d[prim].fillna(d[back])
-    return d
-
 def detect_hydraulic_interference(row_or_df):
     is_dhw = row_or_df['is_DHW']
     pump_cols = [c for c in ['Zone_UFH', 'Zone_DS', 'Zone_US'] if c in row_or_df]
@@ -99,6 +99,7 @@ def apply_gatekeepers(df):
     d = apply_sensor_fallbacks(d)
 
     # 2. Ensure all expected columns exist (Gatekeeper 1)
+    # UPDATED: Replaced HP_Binary_Status with Heat_Pump_Active
     expected = ['Freq', 'Power', 'Heat', 'DeltaT', 'FlowRate', 'FlowTemp', 'ReturnTemp',
                 'OutdoorTemp', 'DHW_Temp', 'Indoor_Power', 'Immersion_Mode', 'Heat_Pump_Active',
                 'Defrost', 'Zone_UFH', 'Zone_DS', 'Zone_US', 'Pump_Primary', 'Pump_Secondary']
