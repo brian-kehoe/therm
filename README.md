@@ -1,7 +1,8 @@
 # T.H.E.R.M.
 ### (Thermal Health & Efficiency Reporting Module)
 
-**T.H.E.R.M.** is a modular, forensic analytics engine designed to audit the performance of Samsung Heat Pumps (specifically the EHS Mono Gen 6). It transforms raw Grafana/Home Assistant CSV logs into actionable intelligence, highlighting efficiency gaps, hydraulic issues, and data quality problems.
+**T.H.E.R.M.** is a modular, forensic analytics engine designed to audit the performance of Heat Pumps (initially developed for Samsung Gen 6 Heat Pump). 
+It transforms raw Grafana/Home Assistant CSV logs into actionable intelligence, highlighting efficiency gaps, hydraulic issues, and data quality problems.
 
 ---
 
