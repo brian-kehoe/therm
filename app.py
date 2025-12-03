@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import os
 import warnings
 import json
+import streamlit as st
 
 # Suppress noisy RuntimeWarning for sparse data averages
 warnings.filterwarnings("ignore", message="Mean of empty slice", category=RuntimeWarning)
@@ -22,6 +23,8 @@ from utils import safe_div, availability_pct
 import data_loader
 import processing
 import baselines
+
+#st.write("Step 1: App Started")  # <--- Debug Line 1
 
 # Page Setup
 st.set_page_config(page_title="Heat Pump Analytics", layout="wide", page_icon="🔥")
@@ -72,6 +75,7 @@ uploaded_files = st.sidebar.file_uploader("Upload CSV(s)", accept_multiple_files
 
 if uploaded_files:
     cached = process_uploaded_files_once(uploaded_files)
+    #st.write("Step 2: Processing Complete")  # <--- Debug Line 2
     if cached and cached.get("df") is not None:
         df = cached["df"]
         runs_list = cached["runs"]
@@ -484,10 +488,36 @@ if uploaded_files:
                 system_on_minutes = daily_df.apply(lambda r: max(r.get('Recorded_Minutes', 0), r.get('DQ_Power_Count', 0), 1), axis=1)
                 
                 def expected_window_series(sensor_name, system_on_minutes):
+                    # 1. Try to get a smart target from the learned Baseline
+                    # (This aligns the score with what is "normal" for this specific sensor)
+                    baseline_data = st.session_state.get("heartbeat_baseline", {}).get(sensor_name)
+                    
+                    if baseline_data and baseline_data.get('expected_minutes'):
+                        # Calculate expected ratio (e.g. 0.05 updates per minute)
+                        # We use 1440.0 as the standard day reference for the baseline
+                        baseline_ratio = baseline_data['expected_minutes'] / 1440.0
+                        
+                        # Apply that ratio to the actual active time today
+                        # If system was on for 1000 mins, and sensor usually reports 10% of the time, expect 100 updates.
+                        base = system_on_minutes * baseline_ratio
+                        
+                        # Ensure we expect at least 1 update if the system was on
+                        return base.replace(0, np.nan).apply(lambda x: max(1.0, x) if x > 0 else np.nan)
+
+                    # 2. Fallback: Use Manual Rules (if no baseline exists yet)
                     mode = SENSOR_EXPECTATION_MODE.get(sensor_name, 'system')
-                    if mode == 'heating_active': base = daily_df.get('Active_Mins', system_on_minutes)
-                    elif mode == 'dhw_active': base = daily_df.get('Total_DHW_Mins', system_on_minutes)
-                    else: base = system_on_minutes
+                    
+                    if mode == 'heating_active': 
+                        base = daily_df.get('Active_Mins', system_on_minutes)
+                    elif mode == 'dhw_active': 
+                        base = daily_df.get('Total_DHW_Mins', system_on_minutes)
+                    elif mode == 'system_slow':
+                        # Manual fallback for slow sensors
+                        base = (system_on_minutes / 60.0).apply(np.ceil)
+                    else: 
+                        # Default 'system' = expect 1 update per minute
+                        base = system_on_minutes
+                        
                     return base.replace(0, np.nan)
 
                 # --- Helper to Format Index ---
@@ -596,14 +626,20 @@ if uploaded_files:
                     count_cols = [c for c in daily_df.columns if c.endswith('_count') or c.endswith('_Count')]
                     if count_cols:
                         # 1. Calculate raw percentages
+                        # 1. Calculate raw percentages
                         flat_data = {}
                         for c in count_cols:
                             clean_name = c.replace('DQ_', '').replace('_Count', '').replace('_count', '')
-                            # SKIP short cycles calc here if present
+                            
+                            # SKIP short cycles calc
                             if 'short_cycle' in clean_name.lower(): 
                                 continue
-                                
-                            if 'defrost' in clean_name.lower():
+                            
+                            # Check the CONFIG for the mode
+                            mode = SENSOR_EXPECTATION_MODE.get(clean_name, 'system')
+                            
+                            # If it's an Event (like Defrost, ValveMode), just show raw count
+                            if mode == 'event_only':
                                 flat_data[clean_name] = daily_df[c].fillna(0).astype(int)
                             else:
                                 expected = expected_window_series(clean_name, system_on_minutes)
@@ -615,31 +651,31 @@ if uploaded_files:
                         new_columns = []
                         valid_data_cols = []
                         
-                        # Store Events group to append at the very end
                         events_group_name = None
                         events_sensors = []
 
                         # A. Process defined groups (EXCEPT Events)
                         for cat_name, sensors in SENSOR_GROUPS.items():
-                            # Hold back Events for the end
                             if "Event" in cat_name:
                                 events_group_name = cat_name
                                 events_sensors = sensors
                                 continue
 
-                            found_sensors = sorted([s for s in sensors if s in df_flat.columns])
+                            # FIX: Removed 'sorted()' to respect the order in config.py
+                            found_sensors = [s for s in sensors if s in df_flat.columns]
+                            
                             for s in found_sensors:
                                 new_columns.append((cat_name, s))
                                 valid_data_cols.append(s)
 
-                        # B. Process Rooms
+                        # B. Process Rooms (Keep alphabetical as it makes sense for rooms)
                         room_cols = sorted([c for c in df_flat.columns if c.startswith('Room_') and c not in valid_data_cols])
                         for r in room_cols:
                             short_name = r.replace('Room_', '')
                             new_columns.append(("🌡️ Rooms", short_name))
                             valid_data_cols.append(r)
 
-                        # C. Process 'Other'
+                        # C. Process 'Other' (Keep alphabetical)
                         remaining = sorted([c for c in df_flat.columns if c not in valid_data_cols and (not events_sensors or c not in events_sensors)])
                         for rem in remaining:
                             new_columns.append(("Other", rem))
@@ -647,7 +683,7 @@ if uploaded_files:
 
                         # D. Process Events (LAST)
                         if events_group_name:
-                            found_events = sorted([s for s in events_sensors if s in df_flat.columns])
+                            found_events = [s for s in events_sensors if s in df_flat.columns]
                             for s in found_events:
                                 new_columns.append((events_group_name, s))
                                 valid_data_cols.append(s)
@@ -658,16 +694,21 @@ if uploaded_files:
                         df_final = format_dq_df(df_final)
 
                         # 4. Render with Styling
-                        defrost_cols = [col for col in df_final.columns if 'defrost' in col[1].lower()]
-                        normal_cols = [col for col in df_final.columns if col not in defrost_cols]
+                        # Identify 'Event' columns dynamically based on Config
+                        event_cols = [
+                            col for col in df_final.columns 
+                            if SENSOR_EXPECTATION_MODE.get(col[1], 'system') == 'event_only'
+                        ]
+                        normal_cols = [col for col in df_final.columns if col not in event_cols]
 
                         styler = df_final.style.format("{:.0f}", na_rep="-")
                         
                         if normal_cols:
                             styler = styler.background_gradient(subset=normal_cols, cmap='RdYlGn', vmin=0, vmax=100)
                         
-                        if defrost_cols:
-                            styler = styler.map(lambda x: "background-color: #e0e0e0; color: #555555", subset=defrost_cols)
+                        if event_cols:
+                            # Apply Neutral Grey to all Event sensors (Valve, DHW Mode, Defrost)
+                            styler = styler.map(lambda x: "background-color: #e0e0e0; color: #555555", subset=event_cols)
 
                         st.dataframe(styler, width="stretch")
 

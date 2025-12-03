@@ -23,18 +23,95 @@ THRESHOLDS = {
 
 NIGHT_HOURS = [2, 3, 4, 5]
 
-SENSOR_EXPECTATION_MODE = {
-    'Power': 'system', 'Indoor_Power': 'system', 'FlowTemp': 'system', 'ReturnTemp': 'system',
-    'Heat': 'heating_active', 'COP_Raw': 'heating_active', 'FlowRate': 'heating_active', 'DeltaT': 'heating_active',
-    'DHW_Temp': 'dhw_active',
-    'OutdoorTemp': 'system', 'Outdoor_Humidity': 'system', 'Solar_Rad': 'system', 'Wind_Speed': 'system',
-    'Room_Hallway': 'system', 'Room_Ecowitt_Hub': 'system', 'Room_Living': 'system', 'Room_Playroom': 'system',
-    'Room_MainBed': 'system', 'Room_Oisin': 'system', 'Room_Caoimhe': 'system',
-    'DHW_Mode': 'system', 'Immersion_Mode': 'system', 'HP_Binary_Status': 'system', 'Zone_UFH': 'system',
-    'Zone_DS': 'system', 'Zone_US': 'system', 'Pump_Primary': 'system', 'Pump_Secondary': 'system',
-    'Quiet_Mode': 'system', 'Defrost': 'event_only',
+# ==========================================
+# PHYSICS & HYDRAULIC CONSTANTS
+# ==========================================
+# Specific Heat Capacity (kJ/L.K)
+# 4.186 = Pure Water
+# 3.900 = 20% Glycol (Standard for Samsung Monoblocs)
+SPECIFIC_HEAT_CAPACITY = 3.9 
+
+# Calculation Thresholds (Gatekeepers)
+PHYSICS_THRESHOLDS = {
+    "min_flow_rate_lpm": 3.0,       # Minimum flow to count as "moving water"
+    "min_freq_for_delta_t": 5.0,    # Compressor Hz required to trust Delta T
+    "min_freq_for_heat": 7.5,       # Compressor Hz required to calculate Heat Output
+    "max_valid_delta_t": 15.0,      # Sanity check: Delta T shouldn't exceed this
+    "min_valid_delta_t": 0.2        # Ignore tiny fluctuations
 }
 
+# ==========================================
+# SENSOR GROUPS (Visual Display Order)
+# ==========================================
+SENSOR_GROUPS = {
+    "⚡ Power & Energy": ['Power', 'Indoor_Power', 'Heat'],
+    "💧 Hydraulics": ['DeltaT', 'FlowRate', 'FlowTemp', 'ReturnTemp', 'Pump_Primary', 'Pump_Secondary', 'ValveMode'],
+    "🌤️ Environment": ['OutdoorTemp', 'Solar_Rad', 'Wind_Speed', 'Outdoor_Humidity'],
+    
+    # Updated 'Heat_Pump_Active' here:
+    "⚙️ System State": ['Heat_Pump_Active', 'DHW_Mode', 'Immersion_Mode', 'Quiet_Mode', 'DHW_Temp'],
+    
+    "🏠 Zones": ['Zone_UFH', 'Zone_DS', 'Zone_US'],
+    "ℹ️ Events": ['Defrost']
+}
+
+# ==========================================
+# SENSOR EXPECTATION MODES (Data Quality)
+# ==========================================
+SENSOR_EXPECTATION_MODE = {
+    # --- POWER & ENERGY ---
+    'Power': 'system',
+    'Indoor_Power': 'system',
+    'Heat': 'heating_active',
+    
+    # --- HYDRAULICS (Active Heating) ---
+    'FlowTemp': 'system',
+    'ReturnTemp': 'system',
+    'FlowRate': 'heating_active',
+    'DeltaT': 'heating_active',
+    'COP_Raw': 'heating_active',
+    
+    # --- HYDRAULICS (DHW) ---
+    'DHW_Temp': 'dhw_active',
+
+    # --- ENVIRONMENT ---
+    'OutdoorTemp': 'system',
+    'Outdoor_Humidity': 'system',
+    'Solar_Rad': 'system',
+    'Wind_Speed': 'system',
+
+    # --- ROOM TEMPERATURES ---
+    'Room_Hallway': 'system',
+    'Room_Ecowitt_Hub': 'system',
+    'Room_Living': 'system',
+    'Room_Playroom': 'system',
+    'Room_MainBed': 'system',
+    'Room_Oisin': 'system',
+    'Room_Caoimhe': 'system',
+
+    # --- EVENTS / BINARY STATE (Neutral Grey Scoring) ---
+    # These show a raw count ("12") instead of a percentage ("100%")
+    'Immersion_Mode': 'event_only',   # On/Off switch
+    'Quiet_Mode': 'event_only',       # Silent mode switch
+    'Defrost': 'event_only',          # Defrost active flag
+
+    # --- INFREQUENT SYSTEM (System Health) ---
+    # We treat these as 'system' so they get a Green/Red score.
+    # The "Seasonal Heartbeat" baseline will automatically learn that they 
+    # report less frequently than 1/min, ensuring fair scoring.
+    'Zone_UFH': 'system',
+    'Zone_DS': 'system',
+    'Zone_US': 'system',
+    'Pump_Primary': 'system',
+    'Pump_Secondary': 'system',
+    'Heat_Pump_Active': 'system',     # Generic running signal
+    'ValveMode': 'system',            # Heating vs DHW valve position
+    'DHW_Mode': 'system',             # Eco vs Standard
+}
+
+# ==========================================
+# SENSOR ROLES (Heartbeat Learning)
+# ==========================================
 SENSOR_ROLES = {
     'sensor.heat_pump_power_ch1': 'core_periodic',
     'sensor.heat_pump_heat_output': 'core_periodic',
@@ -68,6 +145,9 @@ SENSOR_ROLES = {
     'sensor.heat_pump_defrost_status': 'rare_event',
 }
 
+# ==========================================
+# ENTITY MAPPING (Raw -> Friendly)
+# ==========================================
 ENTITY_MAP = {
     'sensor.heat_pump_power_ch1': 'Power',
     'sensor.heat_pump_heat_output': 'Heat',
@@ -77,7 +157,10 @@ ENTITY_MAP = {
     'sensor.heat_pump_compressor_frequency': 'Freq',
     'sensor.heat_pump_flow_rate': 'FlowRate',
     'sensor.heat_pump_cop': 'COP_Raw',
-    'binary_sensor.heat_pump_in_operation': 'HP_Binary_Status',
+    
+    # UPDATED MAPPING: Maps raw sensor to your new 'Heat_Pump_Active' name
+    'binary_sensor.heat_pump_in_operation': 'Heat_Pump_Active', 
+    
     'sensor.heat_pump_flow_temperature': 'FlowTemp',
     'sensor.heat_pump_return_temperature': 'ReturnTemp',
     'sensor.heat_pump_outdoor_temperature': 'OutdoorTemp',
@@ -107,17 +190,6 @@ ZONE_TO_ROOM_MAP = {
     'Zone_UFH': ['Room_Ecowitt_Hub'], 
     'Zone_DS':  ['Room_Living', 'Room_Playroom', 'Room_Hallway'],
     'Zone_US':  ['Room_MainBed', 'Room_Oisin', 'Room_Caoimhe']
-}
-
-
-# Unified Sensor Groupings for Data Quality Tabs
-SENSOR_GROUPS = {
-    "⚡ Power & Energy": ['Power', 'Indoor_Power', 'Heat'],
-    "💧 Hydraulics": ['FlowRate', 'FlowTemp', 'ReturnTemp', 'DeltaT', 'Pump_Primary', 'Pump_Secondary', 'ValveMode'],
-    "🌤️ Environment": ['OutdoorTemp', 'Solar_Rad', 'Wind_Speed', 'Outdoor_Humidity'],
-    "⚙️ System State": ['HP_Binary_Status', 'DHW_Mode', 'Immersion_Mode', 'Quiet_Mode', 'DHW_Temp'],
-    "🏠 Zones": ['Zone_UFH', 'Zone_DS', 'Zone_US'],
-    "ℹ️ Events": ['Defrost']
 }
 
 TARIFF_STRUCTURE = [

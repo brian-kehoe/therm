@@ -2,8 +2,53 @@
 import pandas as pd
 import numpy as np
 from config import (THRESHOLDS, ENTITY_MAP, NIGHT_HOURS, MIN_HEAT_FREQ, MIN_POWER_W, 
-                    TARIFF_STRUCTURE, ZONE_TO_ROOM_MAP, CONFIG_HISTORY)
+                    TARIFF_STRUCTURE, ZONE_TO_ROOM_MAP, CONFIG_HISTORY, 
+                    SPECIFIC_HEAT_CAPACITY, PHYSICS_THRESHOLDS)
 from utils import safe_div, availability_pct
+
+def calculate_physics_metrics(df):
+    """
+    Overwrites imported 'Heat' and 'DeltaT' columns with Python-calculated values.
+    Returns NaN for DeltaT if invalid, so Data Quality correctly reports gaps.
+    """
+    d = df.copy()
+    
+    # --- LOGIC: COMPRESSOR STATUS ---
+    freq_active = d['Freq'] > PHYSICS_THRESHOLDS['min_freq_for_heat']
+    power_active = d['Power'] > MIN_POWER_W
+    is_compressor_on = freq_active | power_active
+
+    # 1. Calculate Raw Delta T (Flow - Return)
+    raw_delta = d['FlowTemp'] - d['ReturnTemp']
+    
+    # 2. Apply Delta T Logic Mask
+    valid_delta_mask = (
+        is_compressor_on &
+        (d['FlowRate'] > PHYSICS_THRESHOLDS['min_flow_rate_lpm']) &
+        (raw_delta > PHYSICS_THRESHOLDS['min_valid_delta_t']) &
+        (raw_delta <= PHYSICS_THRESHOLDS['max_valid_delta_t'])
+    )
+    
+    # FIX: Use np.nan instead of 0.0 for invalid data so DQ counts it as missing
+    d['DeltaT'] = np.where(valid_delta_mask, raw_delta, np.nan)
+    
+    # 3. Calculate Heat Output (Watts)
+    defrost_active = d['Defrost'] == 1 if 'Defrost' in d.columns else False
+    
+    valid_heat_mask = (
+        is_compressor_on &
+        (d['FlowRate'] > PHYSICS_THRESHOLDS['min_flow_rate_lpm']) &
+        (d['DeltaT'] > 0) & 
+        (~defrost_active)
+    )
+    
+    flow_lps = d['FlowRate'] / 60.0
+    heat_watts = flow_lps * SPECIFIC_HEAT_CAPACITY * d['DeltaT'] * 1000.0
+    
+    # Keep Heat as 0.0 when off (because 0 watts is a valid "off" state)
+    d['Heat'] = np.where(valid_heat_mask, heat_watts, 0.0)
+    
+    return d
 
 def detect_hydraulic_interference(row_or_df):
     is_dhw = row_or_df['is_DHW']
@@ -31,11 +76,18 @@ def detect_hydraulic_interference(row_or_df):
 
 def apply_gatekeepers(df):
     d = df.copy()
+    
+    # 1. Ensure all expected columns exist (Gatekeeper 1)
+    # UPDATED: Replaced HP_Binary_Status with Heat_Pump_Active
     expected = ['Freq', 'Power', 'Heat', 'DeltaT', 'FlowRate', 'FlowTemp', 'ReturnTemp',
-                'OutdoorTemp', 'DHW_Temp', 'Indoor_Power', 'Immersion_Mode', 'HP_Binary_Status',
+                'OutdoorTemp', 'DHW_Temp', 'Indoor_Power', 'Immersion_Mode', 'Heat_Pump_Active',
                 'Defrost', 'Zone_UFH', 'Zone_DS', 'Zone_US', 'Pump_Primary', 'Pump_Secondary']
     for col in expected:
         if col not in d.columns: d[col] = 0.0
+
+    # --- NEW: INJECT PHYSICS ENGINE HERE ---
+    d = calculate_physics_metrics(d)
+    # ---------------------------------------
 
     d['Heat'] = d['Heat'].clip(lower=0, upper=9500)
     d['OutdoorTemp'] = d['OutdoorTemp'].clip(upper=30)
@@ -43,21 +95,24 @@ def apply_gatekeepers(df):
     if 'ValveMode' not in d.columns: d['ValveMode'] = 'Heating'
     if 'DHW_Mode' not in d.columns: d['DHW_Mode'] = 'Standard'
 
-    d['HP_Binary_Status_Clean'] = d['HP_Binary_Status'].fillna(0).astype(int)
-    if d['HP_Binary_Status_Clean'].sum() == 0 and 'Freq' in d.columns:
-        d['HP_Binary_Status_Clean'] = np.where(
+    # UPDATED: Logic now uses Heat_Pump_Active
+    d['Heat_Pump_Active_Clean'] = d['Heat_Pump_Active'].fillna(0).astype(int)
+    
+    if d['Heat_Pump_Active_Clean'].sum() == 0 and 'Freq' in d.columns:
+        d['Heat_Pump_Active_Clean'] = np.where(
             (d['Freq'] > MIN_HEAT_FREQ) | (abs(d['Power']) > MIN_POWER_W),
             1, 0
         ).astype(int)
 
-    d['run_start_raw'] = (d['HP_Binary_Status_Clean'].diff() == 1).astype(int)
+    d['run_start_raw'] = (d['Heat_Pump_Active_Clean'].diff() == 1).astype(int)
     d['power_lagged'] = d['Power'].shift(1).fillna(0)
     false_start_mask = (d['run_start_raw'] == 1) & (d['power_lagged'] > MIN_POWER_W)
-    d.loc[false_start_mask, 'HP_Binary_Status_Clean'] = 0 
+    d.loc[false_start_mask, 'Heat_Pump_Active_Clean'] = 0 
     d['run_start'] = np.where(false_start_mask, 0, d['run_start_raw'])
-    d['HP_Binary_Status'] = d['HP_Binary_Status_Clean']
+    d['Heat_Pump_Active'] = d['Heat_Pump_Active_Clean']
 
-    d['is_active'] = (d['HP_Binary_Status'] == 1) | (abs(d['Power']) > MIN_POWER_W)
+    # UPDATED: is_active depends on Heat_Pump_Active
+    d['is_active'] = (d['Heat_Pump_Active'] == 1) | (abs(d['Power']) > MIN_POWER_W)
     d['is_active'] = d['is_active'].astype(int)
     d['is_heating'] = (d['Freq'] > MIN_HEAT_FREQ) | (abs(d['Power']) > MIN_POWER_W)
     
@@ -438,4 +493,6 @@ def get_daily_stats(df):
     daily['DQ_Tier'] = dq_results[0]
     daily['DQ_Score'] = dq_results[1]
 
-    return daily[daily['Total_Heat_kWh'] > 0.1]
+    # Return ALL days (do not filter out zero-heat days)
+    # This allows Data Quality to show full history even if heat physics failed
+    return daily
