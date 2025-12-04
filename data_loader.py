@@ -131,16 +131,18 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
 
     if not all_dfs: return None
     full_df = pd.concat(all_dfs, ignore_index=True).sort_values('last_changed')
-    if progress_cb: progress_cb("Normalizing entity IDs (Optimized)...", 40)
-
-    # 3. Entity Normalization & Whitelisting (PERFORMANCE FIX)
-    ACTIVE_MAP = {**FALLBACK_OWM_MAP, **ENTITY_MAP}
     
-    # --- PERFORMANCE FIX: Map Unique IDs First (O(1) vs O(N)) ---
-    # Instead of checking every single row, we check the ~50 unique names once.
+    if progress_cb: progress_cb("Mapping entity IDs (Vectorized)...", 40)
+
+    # 3. Entity Normalization (HIGH PERFORMANCE)
+    ACTIVE_MAP = {**FALLBACK_OWM_MAP, **ENTITY_MAP}
+    valid_keys = set(k.strip().lower() for k in ACTIVE_MAP.keys())
+    
+    # Get unique IDs only (small list, e.g., 50 items)
     unique_ids = full_df['entity_id'].unique()
     id_map = {}
     
+    # Build map only for the unique items
     for raw_id in unique_ids:
         s_id = str(raw_id).strip().lower()
         
@@ -158,23 +160,21 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
                 found_prefix = True
                 break
         
-        # C. No Match? Keep Raw ID (Preserve Unmapped Data)
+        # C. No Match? Keep Raw ID
         if not found_prefix:
             id_map[raw_id] = s_id
 
-    # Apply the map instantly using vectorization
-    full_df['entity_id'] = full_df['entity_id'].map(id_map)
+    # Apply mapping using fast vectorized replacement
+    # This is much faster than .apply() or .map() for large N with small K categories
+    full_df['entity_id'] = full_df['entity_id'].replace(id_map)
 
-    # Identify Unmapped Entities for the UI
-    valid_keys = set(k.strip().lower() for k in ACTIVE_MAP.keys())
+    # Identify Unmapped Entities
     final_unique = set(full_df['entity_id'].unique())
     unmapped_entities = sorted(list(final_unique - valid_keys))
     
     if not full_df.empty:
-        # --- FIX: Mixed Date Parsing ---
-        # Handles both ISO8601 (HA) and Grafana formats in the same column
+        # Robust Date Parsing
         full_df['last_changed'] = pd.to_datetime(full_df['last_changed'], errors='coerce', dayfirst=True, format='mixed', utc=True)
-        # Convert to TZ-naive for plotting
         full_df['last_changed'] = full_df['last_changed'].dt.tz_localize(None)
         full_df = full_df.dropna(subset=['last_changed'])
 
@@ -219,8 +219,7 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
     # Smart Forward Fill
     df_res = smart_forward_fill(df_res, sensor_patterns)
     
-    # 7. Rename Entities (using the merged ACTIVE_MAP)
-    # Renames known entities to friendly names (e.g. 'sensor.power' -> 'Power')
+    # 7. Rename Entities
     clean_map = {k.strip().lower(): v for k, v in ACTIVE_MAP.items()}
     df_res = df_res.rename(columns=clean_map)
 
