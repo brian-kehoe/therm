@@ -11,7 +11,7 @@ from utils import safe_div
 
 
 def render_long_term_trends(daily_df, raw_df, runs_list):
-    st.title("📈 Long-Term Performance")
+    st.title("Long-Term Performance")
 
     if daily_df.empty:
         st.warning("No valid daily data found.")
@@ -300,3 +300,4 @@ def render_long_term_trends(daily_df, raw_df, runs_list):
 
         if st.checkbox("Show Raw JSON Payload", value=False):
             st.json(ai_payload)
+
