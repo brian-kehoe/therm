@@ -27,10 +27,13 @@ import view_trends
 import view_runs
 import view_quality
 
-st.set_page_config(page_title="T.H.E.R.M.", layout="wide", page_icon="🔥")
+st.set_page_config(page_title="therm", layout="wide", page_icon="🔥")
 
 # === SIDEBAR ===
-st.sidebar.title("Heat Pump Analytics")
+st.sidebar.image("assets/therm_logo.png", use_container_width=True)
+st.sidebar.markdown(
+    "**Thermal Health & Efficiency Reporting Module**"
+)
 uploaded_files = st.sidebar.file_uploader("Upload CSV(s)", accept_multiple_files=True, type="csv")
 show_inspector = st.sidebar.checkbox("Show File Inspector", value=False)
 
@@ -113,3 +116,21 @@ if uploaded_files:
                 )
 else:
     st.info("Upload CSV files to begin.")
+
+# === ABOUT SECTION (Placed at the bottom of the sidebar) ===
+
+# Using st.expander is a common way to include an "About" section in the sidebar
+st.sidebar.markdown("---") # Optional separator
+
+with st.sidebar.expander("ℹ️ About therm"):
+    st.markdown(
+        """
+        **therm** (Thermal Health & Efficiency Reporting Module) is an open-source tool dedicated to **heat pump performance analysis**.
+        
+        Simply upload your heat pump data logs (in CSV format) to instantly visualize key performance metrics, diagnose hydraulic and control issues, and audit data quality.
+        
+        Our goal is to help homeowners, installers, and researchers **maximize the efficiency** and lifespan of heat pump systems by providing accessible, insightful analytics.
+        
+        *Made by the community, for the community.*
+        """
+    )
