@@ -123,15 +123,30 @@ def render_run_inspector(df, runs_list):
         if "FlowRate" in run_data.columns:
             fig2.add_trace(go.Scatter(x=run_data.index, y=run_data["FlowRate"], name="Flow", line=dict(color="cyan")), row=2, col=1)
 
-        zone_map = {"DHW_Active": "Hot Water", "Zone_UFH": "Kitchen", "Zone_DS": "Downstairs", "Zone_US": "Upstairs"}
-        zone_offsets = {"DHW_Active": 0, "Zone_UFH": 1, "Zone_DS": 2, "Zone_US": 3}
-        for z_col, z_name in zone_map.items():
-            if z_col in run_data.columns:
+        # Dynamic zone/flag plotting (supports Zone_*, DHW_Active, ValveMode-derived)
+        zone_cols = [c for c in run_data.columns if c.startswith("Zone_") or c == "DHW_Active"]
+        zone_cols = sorted(zone_cols)
+        if zone_cols:
+            zone_offsets = {z: i for i, z in enumerate(zone_cols)}
+            for z_col in zone_cols:
                 base_y = zone_offsets[z_col]
-                y_vals = run_data[z_col].apply(lambda x: base_y + 0.8 if x > 0 else None)
-                fig2.add_trace(go.Scatter(x=run_data.index, y=y_vals, name=z_name, mode="lines", line=dict(width=15), connectgaps=False), row=3, col=1)
-
-        fig2.update_yaxes(tickvals=[0.4, 1.4, 2.4, 3.4], ticktext=["Hot Water", "Kitchen", "Downstairs", "Upstairs"], range=[0, 4], row=3, col=1)
+                series = pd.to_numeric(run_data[z_col], errors="coerce").fillna(0)
+                y_vals = series.apply(lambda x: base_y + 0.8 if x > 0 else None)
+                fig2.add_trace(
+                    go.Scatter(
+                        x=run_data.index,
+                        y=y_vals,
+                        name=z_col.replace("Zone_", "Zone "),
+                        mode="lines",
+                        line=dict(width=15),
+                        connectgaps=False,
+                    ),
+                    row=3,
+                    col=1,
+                )
+            tick_positions = [v + 0.4 for v in zone_offsets.values()]
+            tick_labels = [zc.replace("Zone_", "Zone ") if zc != "DHW_Active" else "Hot Water" for zc in zone_offsets.keys()]
+            fig2.update_yaxes(tickvals=tick_positions, ticktext=tick_labels, range=[0, len(zone_cols)+0.5], row=3, col=1)
 
         if is_dhw:
             if "DHW_Temp" in run_data.columns:
