@@ -35,12 +35,16 @@ uploaded_files = st.sidebar.file_uploader("Upload CSV(s)", accept_multiple_files
 show_inspector = st.sidebar.checkbox("Show File Inspector", value=False)
 
 # === CACHING LOGIC ===
+@st.cache_data(show_spinner=False) # <--- Added st.cache_data here for safety, though it's called by the session state logic.
 def process_data(files):
     key = tuple(sorted((f.name, f.size) for f in files))
     if "cached" in st.session_state and st.session_state["cached"]["key"] == key:
         return st.session_state["cached"]
     
     pbar = st.progress(0, "Loading...")
+    # NOTE: The progress bar function is defined here, so the cache decorator needs to be managed carefully.
+    # We rely on the session state check to handle the memoization, but adding the decorator is standard practice.
+    
     res = data_loader.load_and_clean_data(files, lambda t, p: pbar.progress(p, t))
     if not res: return None
     
@@ -80,7 +84,9 @@ if uploaded_files:
             mode = st.sidebar.radio("Analysis Mode", ["Long-Term Trends", "Run Inspector", "Data Quality Audit"])
             
             if mode == "Long-Term Trends":
-                view_trends.render_long_term_trends(data["daily"], data["df"])
+                # START OF CHANGE: Pass the pre-computed runs list
+                view_trends.render_long_term_trends(data["daily"], data["df"], data["runs"])
+                # END OF CHANGE
             elif mode == "Run Inspector":
                 view_runs.render_run_inspector(data["df"], data["runs"])
             elif mode == "Data Quality Audit":

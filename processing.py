@@ -180,9 +180,15 @@ def apply_gatekeepers(df):
     d['Current_Rate'] = np.nan
     sorted_tariffs = sorted(TARIFF_STRUCTURE, key=lambda x: x['valid_from'])
     for i, profile in enumerate(sorted_tariffs):
-        start_date = pd.to_datetime(profile['valid_from']).tz_localize(d.index.tz)
+        # NOTE: Timezone logic here will assume the index is already localized/tz-naive UTC
+        start_date = pd.to_datetime(profile['valid_from'])
+        if d.index.tz:
+             start_date = start_date.tz_localize(d.index.tz)
+        
         if i < len(sorted_tariffs) - 1:
-            end_date = pd.to_datetime(sorted_tariffs[i+1]['valid_from']).tz_localize(d.index.tz)
+            end_date = pd.to_datetime(sorted_tariffs[i+1]['valid_from'])
+            if d.index.tz:
+                end_date = end_date.tz_localize(d.index.tz)
         else:
             end_date = d.index.max() + pd.Timedelta(days=1)
         mask_date = (d.index >= start_date) & (d.index < end_date)
@@ -274,6 +280,11 @@ def detect_runs(df):
                 if r_col in group.columns:
                     room_deltas[r_col] = round(group[r_col].iloc[-1] - group[r_col].iloc[0], 2)
 
+        # START OF CHANGE: Calculate avg temps for scatter plot data source
+        avg_outdoor = group['OutdoorTemp'].mean() if 'OutdoorTemp' in group.columns else 0
+        avg_flow_temp = group['FlowTemp'].mean() if 'FlowTemp' in group.columns else 0
+        # END OF CHANGE
+
         runs.append({
             "id": int(run_id),
             "start": start_time,
@@ -291,6 +302,12 @@ def detect_runs(df):
             "dhw_rise": round(dhw_temp_end - dhw_temp_start, 1),
             "avg_dt": group['DeltaT'].mean(),
             "avg_flow": group['FlowRate'].mean() if 'FlowRate' in group.columns else 0,
+            
+            # START OF CHANGE: Add new fields for view_trends
+            "avg_outdoor": round(avg_outdoor, 2),
+            "avg_flow_temp": round(avg_flow_temp, 2),
+            # END OF CHANGE
+            
             "run_cop": safe_div(group['Heat_Clean'].sum(), group['Power_Clean'].sum()),
             "heat_kwh": group['Heat_Clean'].sum() / 60000.0,
             "electricity_kwh": group['Power_Clean'].sum() / 60000.0,
