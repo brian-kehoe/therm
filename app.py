@@ -14,15 +14,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timezone
 
-# --- NEW IMPORTS ---
+# --- MODULE IMPORTS ---
 import data_loader
 import processing
 import inspector
 import view_trends
 import view_runs
 import view_quality
-import mapping_ui          # NEW
-import config_manager      # NEW
+import mapping_ui
+import config_manager
 
 st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="🔥")
 
@@ -40,7 +40,7 @@ def process_data(files, user_config):
     # Create a unique key based on file properties AND the configuration profile
     # This ensures if you change the mapping, the cache invalidates and re-runs.
     files_key = tuple(sorted((f.name, f.size) for f in files))
-    config_key = str(user_config.get('mapping', {})) 
+    config_key = str(user_config) # Hash full config including rooms_per_zone
     combined_key = (files_key, config_key)
 
     if "cached" in st.session_state and st.session_state["cached"]["key"] == combined_key:
@@ -53,7 +53,6 @@ def process_data(files, user_config):
         progress_cb = lambda t, p: pbar.progress(p, t)
         
         # 1. Load & Normalize
-        # Pass the user_config to the loader
         res = data_loader.load_and_clean_data(files, user_config, progress_cb)
         if not res: 
             placeholder.empty()
@@ -65,7 +64,9 @@ def process_data(files, user_config):
         
         # 3. Runs
         pbar.progress(60, "Runs...")
-        runs = processing.detect_runs(df)
+        # === PASS ROOM MAPPING HERE ===
+        rooms_map = user_config.get("rooms_per_zone", {})
+        runs = processing.detect_runs(df, rooms_map)
         
         # 4. Daily Stats
         pbar.progress(80, "Daily Stats...")
@@ -84,7 +85,7 @@ def process_data(files, user_config):
         "df": df, 
         "runs": runs, 
         "daily": daily, 
-        "unmapped": res.get("unmapped_entities", []), # Now handled by mapping
+        "unmapped": [], # Deprecated in v2
         "patterns": res["patterns"]
     }
     st.session_state["cached"] = cache
@@ -95,7 +96,7 @@ if uploaded_files:
     if show_inspector:
         st.title("🕵️ Pre-Flight Inspector")
         summary, details = inspector.inspect_raw_files(uploaded_files)
-        st.dataframe(summary, use_container_width=True)
+        st.dataframe(summary, width="stretch")
         for f, d in details.items():
             with st.expander(f"📄 {f}"):
                 st.write(f"Entities found: {len(d['entities_found'])}")
@@ -131,9 +132,20 @@ if uploaded_files:
 
             # 2. Process Data (using the config)
             data = process_data(uploaded_files, st.session_state["system_config"])
+
+            # === DEBUGGER ===
+            with st.sidebar.expander("🛠️ Data Debugger", expanded=False):
+                st.write("**Full Config:**")
+                st.json(st.session_state["system_config"])
+                if data and "df" in data:
+                    st.write("**Columns:**", list(data["df"].columns))
+                    if data.get("runs"):
+                        st.write(f"Detected {len(data['runs'])} runs")
+                        # Show relevant rooms to verify linkage
+                        st.write(data["runs"][0].get('relevant_rooms', 'No rooms linked'))
+            # ================
             
             # 3. Inject AI Context
-            # Make the user's context available to the view modules
             if "system_config" in st.session_state:
                 st.session_state["ai_context_user"] = st.session_state["system_config"].get("ai_context", {})
 
@@ -148,7 +160,7 @@ if uploaded_files:
                 elif mode == "Data Quality Audit":
                     hb_path = st.session_state.get("heartbeat_baseline_path")
                     view_quality.render_data_quality(
-                        data["daily"], data["df"], data.get("unmapped", []), 
+                        data["daily"], data["df"], [], 
                         data["patterns"], hb_path
                     )
 else:

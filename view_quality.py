@@ -160,7 +160,34 @@ def render_data_quality(daily_df, df, unmapped_entities, patterns, heartbeat_pat
 
             # 3. Build Final DataFrame
             df_final = df_flat[valid_data_cols].copy()
-            df_final.columns = pd.MultiIndex.from_tuples(new_columns)
+            
+            # RENAME COLUMNS TO FRIENDLY NAMES IF POSSIBLE
+            # We try to get the original mapping from session state
+            config_map = st.session_state.get("system_config", {}).get("mapping", {})
+            # Invert map: Internal -> Raw (but simple)
+            # Actually, config_map is Internal: Raw. Perfect.
+            
+            friendly_cols = []
+            for col in df_final.columns:
+                if col in config_map:
+                    # Use the raw sensor name (e.g. "kitchen_temp") instead of "Room_1"
+                    friendly_cols.append(config_map[col])
+                else:
+                    friendly_cols.append(col)
+            
+            # But wait, df_final has MultiIndex columns from previous step...
+            # Actually, let's keep the tuple structure but update the label
+            
+            new_columns_friendly = []
+            for (cat, sensor) in new_columns:
+                if sensor in config_map:
+                    # Show "Room_1 (kitchen_temp)" or just "kitchen_temp"
+                    label = f"{sensor} ({config_map[sensor]})"
+                else:
+                    label = sensor
+                new_columns_friendly.append((cat, label))
+
+            df_final.columns = pd.MultiIndex.from_tuples(new_columns_friendly)
             df_final = format_dq_df(df_final)
 
             # 4. Apply Styles
