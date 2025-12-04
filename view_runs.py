@@ -8,6 +8,13 @@ from config import CALC_VERSION, AI_SYSTEM_CONTEXT, TARIFF_PROFILE_ID, CONFIG_HI
 def render_run_inspector(df, runs_list):
     st.title("🔍 Run Inspector")
     
+    # Retrieve mapping for friendly names
+    # Config is stored as {Internal_Key: User_Sensor_Name}
+    user_mapping = st.session_state.get("system_config", {}).get("mapping", {})
+    
+    def get_friendly_name(internal_key):
+        return user_mapping.get(internal_key, internal_key)
+
     if 'Power_Clean' in df.columns:
         total_kwh_in = (df['Power_Clean'].sum() / 1000) / 60
     else:
@@ -28,7 +35,17 @@ def render_run_inspector(df, runs_list):
     for r in runs_list:
         start_str = r['start'].strftime('%d/%m/%Y %H:%M')
         icon = "🚿" if r['run_type'] == "DHW" else "♨️"
-        zone_label = r.get('active_zones', 'None')
+        
+        # Friendly Zone Label
+        raw_zones = r.get('active_zones', 'None')
+        if raw_zones != "None":
+            # Convert "Zone_1+Zone_2" -> "Kitchen+Upstairs"
+            zone_parts = raw_zones.split('+')
+            friendly_parts = [get_friendly_name(z) for z in zone_parts]
+            zone_label = "+".join(friendly_parts)
+        else:
+            zone_label = "None"
+
         label = f"{start_str} | {r['duration_mins']}m | {icon} {r['run_type']} ({zone_label})"
         run_options[label] = r
 
@@ -90,7 +107,9 @@ def render_run_inspector(df, runs_list):
             series_numeric = pd.to_numeric(run_data[z], errors='coerce').fillna(0)
             y_vals = series_numeric.apply(lambda x: i + 0.8 if x > 0 else None)
             
-            fig2.add_trace(go.Scatter(x=run_data.index, y=y_vals, name=z, mode='lines', line=dict(width=15)), row=3, col=1)
+            # Use Friendly Name for Legend
+            friendly_z = get_friendly_name(z)
+            fig2.add_trace(go.Scatter(x=run_data.index, y=y_vals, name=friendly_z, mode='lines', line=dict(width=15)), row=3, col=1)
             
         if is_dhw and 'DHW_Temp' in run_data.columns:
              fig2.add_trace(go.Scatter(x=run_data.index, y=run_data['DHW_Temp'], name="DHW Tank", line=dict(color='orange')), row=4, col=1)
@@ -107,10 +126,15 @@ def render_run_inspector(df, runs_list):
             
             for col in all_rooms:
                 is_relevant = col in rooms_to_show
-                clean_name = col.replace("Room_", "Room ")
+                # Use Friendly Name
+                # If mapped, get user name. Else default to Room X
+                friendly_room = get_friendly_name(col)
+                if friendly_room == col: # Fallback if no map
+                    friendly_room = col.replace("Room_", "Room ")
+                
                 fig3.add_trace(go.Scatter(
                     x=run_data.index, y=run_data[col], 
-                    name=clean_name, 
+                    name=friendly_room, 
                     mode='lines', 
                     line=dict(width=3 if is_relevant else 1), 
                     opacity=1.0 if is_relevant else 0.3,

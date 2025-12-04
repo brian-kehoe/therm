@@ -38,42 +38,49 @@ show_inspector = st.sidebar.checkbox("Show File Inspector", value=False)
 @st.cache_data(show_spinner=False) 
 def process_data(files, user_config):
     # Create a unique key based on file properties AND the configuration profile
-    # This ensures if you change the mapping, the cache invalidates and re-runs.
     files_key = tuple(sorted((f.name, f.size) for f in files))
-    config_key = str(user_config) # Hash full config including rooms_per_zone
+    config_key = str(user_config) 
     combined_key = (files_key, config_key)
 
     if "cached" in st.session_state and st.session_state["cached"]["key"] == combined_key:
         return st.session_state["cached"]
     
-    # Placeholder container for progress bar
-    placeholder = st.empty()
-    with placeholder.container():
-        pbar = st.progress(0, "Loading...")
-        progress_cb = lambda t, p: pbar.progress(p, t)
-        
+    # === NEW: Use st.status for better visibility ===
+    # This renders in the MAIN body of the app (where the function is called).
+    status_container = st.status("Processing Data...", expanded=True)
+    
+    try:
         # 1. Load & Normalize
+        status_container.write("📂 Loading and cleaning raw files...")
+        
+        # Define a callback that updates the status text if needed
+        progress_cb = lambda t, p: status_container.write(f"Reading: {t}")
+        
         res = data_loader.load_and_clean_data(files, user_config, progress_cb)
         if not res: 
-            placeholder.empty()
+            status_container.update(label="Error loading data", state="error")
             return None
         
         # 2. Hydraulics
-        pbar.progress(40, "Hydraulics...")
-        df = processing.apply_gatekeepers(res["df"])
+        status_container.write("⚙️ Applying physics engine (Flow/Return/Power)...")
+        # PASS CONFIG HERE SO WE CAN MAP FRIENDLY NAMES
+        df = processing.apply_gatekeepers(res["df"], user_config)
         
         # 3. Runs
-        pbar.progress(60, "Runs...")
-        # === PASS ROOM MAPPING HERE ===
-        rooms_map = user_config.get("rooms_per_zone", {})
-        runs = processing.detect_runs(df, rooms_map)
+        status_container.write("🏃 Detecting heating runs and DHW cycles...")
+        runs = processing.detect_runs(df, user_config)
         
         # 4. Daily Stats
-        pbar.progress(80, "Daily Stats...")
+        status_container.write("📊 Aggregating daily statistics...")
         daily = processing.get_daily_stats(df)
         
-        pbar.progress(100, "Done")
-        placeholder.empty()
+        # === FIX: FORCE COMPLETE STATE ===
+        status_container.update(label="Processing Complete!", state="complete", expanded=False)
+
+    except Exception as e:
+        status_container.update(label="Error during processing", state="error")
+        st.error(f"An error occurred: {e}")
+        return None
 
     # Store history (outside cache object)
     st.session_state["raw_history_df"] = res["raw_history"]
@@ -85,7 +92,7 @@ def process_data(files, user_config):
         "df": df, 
         "runs": runs, 
         "daily": daily, 
-        "unmapped": [], # Deprecated in v2
+        "unmapped": [], 
         "patterns": res["patterns"]
     }
     st.session_state["cached"] = cache
@@ -131,6 +138,7 @@ if uploaded_files:
                     st.rerun()
 
             # 2. Process Data (using the config)
+            # This call happens in the main body flow, so the st.status bar appears here.
             data = process_data(uploaded_files, st.session_state["system_config"])
 
             # === DEBUGGER ===
