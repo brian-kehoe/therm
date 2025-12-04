@@ -9,17 +9,27 @@ from utils import safe_div, availability_pct
 def apply_sensor_fallbacks(df):
     """
     Fills gaps in Primary sensors using Backup sensors defined in SENSOR_FALLBACKS.
+    CRITICAL: Forward-fill happens AFTER merge, not before, to preserve DQ integrity.
     """
     d = df.copy()
+    
+    # 1. Apply Fallback Logic (Primary <- Backup)
+    # Use raw OWM data (gaps intact) to preserve true data quality
     for prim, back in SENSOR_FALLBACKS.items():
-        # Only proceed if the backup sensor actually exists in this dataset
         if back in d.columns:
-            # Case 1: Primary column missing entirely? Create it from backup.
             if prim not in d.columns:
-                d[prim] = d[back]
+                d[prim] = d[back].copy()
             else:
-                # Case 2: Primary exists but has gaps (NaNs). Fill them.
                 d[prim] = d[prim].fillna(d[back])
+    
+    # 2. NOW Forward-Fill Sparse Sensors (Post-Merge)
+    # After patching Primary columns, forward-fill for operational use
+    # We use a 2-hour limit (120 mins) to bridge the hourly gap of OWM
+    sparse_cols = [c for c in d.columns if c.endswith('_OWM')]
+    for col in sparse_cols:
+        if col in d.columns:
+            d[col] = d[col].ffill(limit=120) 
+            
     return d
 
 def calculate_physics_metrics(df):
@@ -415,6 +425,15 @@ def get_daily_stats(df):
             elif isinstance(agg_dict[col], list):
                 if 'count' not in agg_dict[col]: agg_dict[col].append('count')
     
+    # -----------------------------------------------------
+    # FIX: Add OWM sensors to aggregation for data quality
+    # -----------------------------------------------------
+    owm_sensors = ['OutdoorTemp_OWM', 'Outdoor_Humidity_OWM', 'Wind_Speed_OWM', 'UV_Index_OWM']
+    for owm in owm_sensors:
+        if owm in df.columns:
+            # We want 'count' to track availability in the daily summary
+            agg_dict[owm] = 'count'
+
     for critical in ['Power', 'Heat', 'FlowTemp', 'ReturnTemp', 'FlowRate', 'Indoor_Power', 'OutdoorTemp']:
         if critical in df.columns and critical not in agg_dict: agg_dict[critical] = 'count'
         elif critical in df.columns and isinstance(agg_dict[critical], list):
@@ -438,7 +457,20 @@ def get_daily_stats(df):
         'Immersion_Active_Min_sum': 'Immersion_Mins'
     })
 
-    dq_mapping = {'Power': 'DQ_Power_Count', 'Heat': 'DQ_Heat_Count', 'FlowTemp': 'DQ_FlowTemp_Count', 'ReturnTemp': 'DQ_ReturnTemp_Count', 'FlowRate': 'DQ_FlowRate_Count'}
+    # -----------------------------------------------------
+    # FIX: Add mappings for OWM counts to DQ columns
+    # -----------------------------------------------------
+    dq_mapping = {
+        'Power': 'DQ_Power_Count', 
+        'Heat': 'DQ_Heat_Count', 
+        'FlowTemp': 'DQ_FlowTemp_Count', 
+        'ReturnTemp': 'DQ_ReturnTemp_Count', 
+        'FlowRate': 'DQ_FlowRate_Count',
+        'OutdoorTemp_OWM': 'DQ_OutdoorTemp_OWM_Count',
+        'Outdoor_Humidity_OWM': 'DQ_Outdoor_Humidity_OWM_Count',
+        'Wind_Speed_OWM': 'DQ_Wind_Speed_OWM_Count',
+        'UV_Index_OWM': 'DQ_UV_Index_OWM_Count'
+    }
     for friendly, canonical in dq_mapping.items():
         col_raw = f"{friendly}_count"
         if col_raw in daily.columns: daily = daily.rename(columns={col_raw: canonical})

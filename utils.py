@@ -3,10 +3,10 @@ import pandas as pd
 import numpy as np
 
 # Explicit exports
-__all__ = ["safe_div", "availability_pct"]
+__all__ = ["safe_div", "availability_pct", "expected_window_for_sparse_sensor", "_log_warn", "_log_error", "_log_info"]
 
 # Lightweight logging helpers
-LOG_VERBOSE = False
+LOG_VERBOSE = True
 
 def _log_warn(msg):
     if LOG_VERBOSE:
@@ -44,3 +44,12 @@ def availability_pct(count_series: pd.Series, expected_series: pd.Series) -> pd.
     if mask.any():
         pct.loc[mask] = (count.loc[mask] / expected.loc[mask]) * 100.0
     return pct.clip(lower=0, upper=100)
+
+def expected_window_for_sparse_sensor(sensor_name: str, baseline_dict: dict, fallback_hours: float = 24.0) -> float:
+    """
+    Calculate expected samples per day for sparse sensors (like OWM).
+    Defaults to 24 samples/day (hourly) if no baseline exists.
+    """
+    if baseline_dict and baseline_dict.get('expected_minutes'):
+        return float(baseline_dict['expected_minutes'])
+    return fallback_hours

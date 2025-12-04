@@ -1,5 +1,5 @@
 # config.py
-CALC_VERSION = "v1.21.0"
+CALC_VERSION = "v1.21.2"
 TARIFF_PROFILE_ID = "Multi_Band_Smart_Tariff"
 
 # Thresholds
@@ -26,9 +26,6 @@ NIGHT_HOURS = [2, 3, 4, 5]
 # ==========================================
 # PHYSICS & HYDRAULIC CONSTANTS
 # ==========================================
-# Specific Heat Capacity (kJ/L.K)
-# 4.186 = Pure Water
-# 3.900 = 20% Glycol (Standard for Samsung Monoblocs)
 SPECIFIC_HEAT_CAPACITY = 3.9 
 
 # Calculation Thresholds (Gatekeepers)
@@ -43,13 +40,10 @@ PHYSICS_THRESHOLDS = {
 # ==========================================
 # SENSOR FALLBACKS (Primary -> Backup)
 # ==========================================
-# If the Primary sensor is missing (NaN) or unavailable, 
-# the system will auto-fill gaps using the Backup sensor.
 SENSOR_FALLBACKS = {
     'OutdoorTemp': 'OutdoorTemp_OWM',
     'Outdoor_Humidity': 'Outdoor_Humidity_OWM',
     'Wind_Speed': 'Wind_Speed_OWM'
-    # Note: Solar_Rad is not backed up by UV_Index due to unit mismatch
 }
 
 # ==========================================
@@ -58,7 +52,8 @@ SENSOR_FALLBACKS = {
 SENSOR_GROUPS = {
     "⚡ Power & Energy": ['Power', 'Indoor_Power', 'Heat'],
     "💧 Hydraulics": ['DeltaT', 'FlowRate', 'FlowTemp', 'ReturnTemp', 'Pump_Primary', 'Pump_Secondary', 'ValveMode'],
-    "🌤️ Environment": ['OutdoorTemp', 'OutdoorTemp_OWM', 'Solar_Rad', 'Wind_Speed', 'Wind_Speed_OWM', 'Outdoor_Humidity', 'Outdoor_Humidity_OWM', 'UV_Index_OWM'],
+    "🌤️ Environment (Primary)": ['OutdoorTemp', 'Solar_Rad', 'Wind_Speed', 'Outdoor_Humidity'],
+    "🌤️ Environment (Backup)": ['OutdoorTemp_OWM', 'Wind_Speed_OWM', 'Outdoor_Humidity_OWM', 'UV_Index_OWM'],
     "⚙️ System State": ['Heat_Pump_Active', 'DHW_Mode', 'Immersion_Mode', 'Quiet_Mode', 'DHW_Temp'],
     "🏠 Zones": ['Zone_UFH', 'Zone_DS', 'Zone_US'],
     "ℹ️ Events": ['Defrost']
@@ -87,11 +82,11 @@ SENSOR_EXPECTATION_MODE = {
     'Solar_Rad': 'system',
     'Wind_Speed': 'system',
     
-    # --- ENVIRONMENT (Backup) ---
-    'OutdoorTemp_OWM': 'system',
-    'Outdoor_Humidity_OWM': 'system',
-    'Wind_Speed_OWM': 'system',
-    'UV_Index_OWM': 'system',
+    # --- ENVIRONMENT (Backup - Sparse) ---
+    'OutdoorTemp_OWM': 'system_slow',
+    'Outdoor_Humidity_OWM': 'system_slow',
+    'Wind_Speed_OWM': 'system_slow',
+    'UV_Index_OWM': 'system_slow',
 
     # --- ROOM TEMPERATURES ---
     'Room_Hallway': 'system',
@@ -103,14 +98,11 @@ SENSOR_EXPECTATION_MODE = {
     'Room_Caoimhe': 'system',
 
     # --- EVENTS / BINARY STATE (Neutral Grey Scoring) ---
-    # These show a raw count ("12") instead of a percentage ("100%")
-    'Immersion_Mode': 'event_only',   # On/Off switch
-    'Quiet_Mode': 'event_only',       # Silent mode switch
-    'Defrost': 'event_only',          # Defrost active flag
+    'Immersion_Mode': 'event_only',
+    'Quiet_Mode': 'event_only',
+    'Defrost': 'event_only',
 
     # --- SYSTEM STATE (Scored) ---
-    # Scored as 'system' so they get Green/Red status.
-    # The Seasonal Heartbeat baseline ensures they aren't punished for reporting infrequently.
     'Zone_UFH': 'system',
     'Zone_DS': 'system',
     'Zone_US': 'system',
@@ -145,11 +137,11 @@ SENSOR_ROLES = {
     'sensor.ecowitt_weather_indoor_temperature': 'room_temp',
     'sensor.heat_pump_temp_humidity_sensor_temperature': 'room_temp',
     
-    # Backup OpenWeather Sensors
-    'sensor.openweathermap_temperature': 'core_periodic',
-    'sensor.openweathermap_humidity': 'core_periodic',
-    'sensor.openweathermap_wind_speed': 'core_periodic',
-    'sensor.openweathermap_uv_index': 'core_periodic',
+    # Backup OpenWeather Sensors (SPARSE)
+    'sensor.openweathermap_temperature': 'weather_sparse',
+    'sensor.openweathermap_humidity': 'weather_sparse',
+    'sensor.openweathermap_wind_speed': 'weather_sparse',
+    'sensor.openweathermap_uv_index': 'weather_sparse',
 
     'binary_sensor.underfloor_pump': 'binary_state',
     'binary_sensor.downstairs_radiator_pump': 'binary_state',
@@ -176,9 +168,7 @@ ENTITY_MAP = {
     'sensor.heat_pump_compressor_frequency': 'Freq',
     'sensor.heat_pump_flow_rate': 'FlowRate',
     'sensor.heat_pump_cop': 'COP_Raw',
-    
     'binary_sensor.heat_pump_in_operation': 'Heat_Pump_Active', 
-    
     'sensor.heat_pump_flow_temperature': 'FlowTemp',
     'sensor.heat_pump_return_temperature': 'ReturnTemp',
     'sensor.heat_pump_outdoor_temperature': 'OutdoorTemp',
@@ -216,9 +206,6 @@ ZONE_TO_ROOM_MAP = {
     'Zone_US':  ['Room_MainBed', 'Room_Oisin', 'Room_Caoimhe']
 }
 
-# ==========================================
-# TARIFF & HISTORY CONFIG
-# ==========================================
 TARIFF_STRUCTURE = [
     {
         "valid_from": "2023-01-01",
@@ -250,9 +237,6 @@ CONFIG_HISTORY = [
     {"start": "2025-12-01", "config_tag": "Sequential Schedule", "change_note": "DHW 02:00-03:00, Heating 03:00-06:00."}
 ]
 
-# ==========================================
-# AI CONTEXT STRING
-# ==========================================
 AI_SYSTEM_CONTEXT = """
 SYSTEM CONTEXT FOR AI ANALYSIS (HEAT PUMP PHYSICS & SETTINGS):
 - Heat Pump Model: Samsung EHS Mono Gen 6 (AE080RXYDEG/EU).

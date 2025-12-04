@@ -7,6 +7,14 @@ from config import ENTITY_MAP, SENSOR_ROLES, BASELINE_JSON_PATH
 from baselines import build_sensor_baselines, analyze_sensor_reporting_patterns, smart_forward_fill, load_saved_heartbeat_baseline
 from utils import _log_warn
 
+# --- FALLBACK MAPPING ---
+FALLBACK_OWM_MAP = {
+    'sensor.openweathermap_wind_speed': 'Wind_Speed_OWM',
+    'sensor.openweathermap_humidity': 'Outdoor_Humidity_OWM',
+    'sensor.openweathermap_uv_index': 'UV_Index_OWM',
+    'sensor.openweathermap_temperature': 'OutdoorTemp_OWM'
+}
+
 def _parse_grafana_timestamp(filename):
     match = re.search(r'-(\d{2}_\d{2}_\d{4} \d{2}_\d{2}_\d{2})\.csv$', filename)
     if match:
@@ -91,6 +99,7 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
     total_files = len(paired_files) * 2 + len(unmatched_files)
     processed = 0
 
+    # 1. Load Paired Grafana Files
     for num_file_name, state_file_name in paired_files:
         try:
             num_h = next(f['handle'] for f in uploaded_file_index if f['fileName'] == num_file_name)
@@ -102,13 +111,18 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
                 progress_cb(f"Loading paired files ({processed}/{total_files})...", pct)
         except Exception: pass
 
+    # 2. Load Unmatched Files (Includes OWM)
     for file_obj in unmatched_files:
         try:
             file_obj['handle'].seek(0)
             df = pd.read_csv(file_obj['handle'])
             df = _normalize_df_columns(df)
+            
+            # Basic check for Long Format (Home Assistant Export)
             if 'last_changed' in df.columns and 'state' in df.columns:
-                all_dfs.append(df.filter(items=['last_changed', 'state', 'entity_id']))
+                if 'entity_id' in df.columns:
+                    df['entity_id'] = df['entity_id'].astype(str).str.lower()
+                    all_dfs.append(df.filter(items=['last_changed', 'state', 'entity_id']))
             processed += 1
             if progress_cb:
                 pct = 10 + int((processed / max(total_files, 1)) * 25)
@@ -117,23 +131,54 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
 
     if not all_dfs: return None
     full_df = pd.concat(all_dfs, ignore_index=True).sort_values('last_changed')
-    if progress_cb: progress_cb("Normalizing entity IDs...", 40)
+    if progress_cb: progress_cb("Normalizing entity IDs (Optimized)...", 40)
 
-    def add_prefix_if_missing(entity_id):
-        entity_id = str(entity_id).lower()
-        if '.' in entity_id: return entity_id
+    # 3. Entity Normalization & Whitelisting (PERFORMANCE FIX)
+    ACTIVE_MAP = {**FALLBACK_OWM_MAP, **ENTITY_MAP}
+    
+    # --- PERFORMANCE FIX: Map Unique IDs First (O(1) vs O(N)) ---
+    # Instead of checking every single row, we check the ~50 unique names once.
+    unique_ids = full_df['entity_id'].unique()
+    id_map = {}
+    
+    for raw_id in unique_ids:
+        s_id = str(raw_id).strip().lower()
+        
+        # A. Direct Match
+        if s_id in ACTIVE_MAP:
+            id_map[raw_id] = s_id
+            continue
+            
+        # B. Prefix Match
+        found_prefix = False
         prefixes = ['sensor.', 'binary_sensor.', 'switch.']
         for prefix in prefixes:
-            if prefix + entity_id in ENTITY_MAP: return prefix + entity_id
-        return entity_id
+            if prefix + s_id in ACTIVE_MAP:
+                id_map[raw_id] = prefix + s_id
+                found_prefix = True
+                break
+        
+        # C. No Match? Keep Raw ID (Preserve Unmapped Data)
+        if not found_prefix:
+            id_map[raw_id] = s_id
 
-    full_df['entity_id'] = full_df['entity_id'].apply(add_prefix_if_missing)
-    full_df = full_df[full_df['entity_id'].isin(ENTITY_MAP.keys())].copy()
+    # Apply the map instantly using vectorization
+    full_df['entity_id'] = full_df['entity_id'].map(id_map)
 
+    # Identify Unmapped Entities for the UI
+    valid_keys = set(k.strip().lower() for k in ACTIVE_MAP.keys())
+    final_unique = set(full_df['entity_id'].unique())
+    unmapped_entities = sorted(list(final_unique - valid_keys))
+    
     if not full_df.empty:
-        full_df['last_changed'] = pd.to_datetime(full_df['last_changed'], errors='coerce', dayfirst=True)
+        # --- FIX: Mixed Date Parsing ---
+        # Handles both ISO8601 (HA) and Grafana formats in the same column
+        full_df['last_changed'] = pd.to_datetime(full_df['last_changed'], errors='coerce', dayfirst=True, format='mixed', utc=True)
+        # Convert to TZ-naive for plotting
+        full_df['last_changed'] = full_df['last_changed'].dt.tz_localize(None)
         full_df = full_df.dropna(subset=['last_changed'])
 
+    # 4. Binary/Numeric Cleaning
     binary_mask = full_df['entity_id'].str.startswith('binary_') | full_df['entity_id'].str.contains('defrost')
     def clean_binary(x):
         s = str(x).lower()
@@ -146,6 +191,7 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
 
     raw_history_df = full_df[['last_changed', 'entity_id']].copy()
 
+    # 5. Load Baselines
     try:
         if not full_df.empty:
             month_values = full_df["last_changed"].dt.month.dropna()
@@ -158,15 +204,27 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
         saved_baselines, source_path = {}, None
 
     if progress_cb: progress_cb("Resampling & filling gaps...", 70)
+    
+    # Pivot (Creates Wide Format)
     df_pivot = full_df.pivot_table(index='last_changed', columns='entity_id', values='state', aggfunc='last')
-    df_resampled = df_pivot.resample('1min').last()
+    
+    # 6. Resample
+    df_res = df_pivot.resample('1min').last()
 
     runtime_baselines = build_sensor_baselines(full_df, SENSOR_ROLES)
     baselines = {**saved_baselines, **runtime_baselines}
-    sensor_patterns = analyze_sensor_reporting_patterns(full_df, baselines=baselines)
-    df_res = smart_forward_fill(df_resampled, sensor_patterns)
-    df_res = df_res.rename(columns=ENTITY_MAP)
     
+    sensor_patterns = analyze_sensor_reporting_patterns(df_pivot, baselines=baselines)
+    
+    # Smart Forward Fill
+    df_res = smart_forward_fill(df_res, sensor_patterns)
+    
+    # 7. Rename Entities (using the merged ACTIVE_MAP)
+    # Renames known entities to friendly names (e.g. 'sensor.power' -> 'Power')
+    clean_map = {k.strip().lower(): v for k, v in ACTIVE_MAP.items()}
+    df_res = df_res.rename(columns=clean_map)
+
+    # 8. Post-Processing & Types
     if 'Immersion_Mode' in df_res.columns:
         df_res['Immersion_Mode'] = df_res['Immersion_Mode'].apply(lambda x: 1 if str(x).lower() == 'on' else 0)
     if 'Quiet_Mode' in df_res.columns:
@@ -182,13 +240,17 @@ def load_and_clean_data(uploaded_files, progress_cb=None):
             return np.nan
         df_res['DHW_Mode'] = df_res['DHW_Mode'].apply(_norm_dhw_mode)
 
+    # Final robust numeric conversion
     for col in [c for c in df_res.columns if c not in ['ValveMode', 'DHW_Mode']]:
-        df_res[col] = pd.to_numeric(df_res[col], errors='coerce')
+        try:
+            df_res[col] = pd.to_numeric(df_res[col], errors='coerce')
+        except Exception: pass
         
     return {
         "df": df_res,
         "raw_history": raw_history_df,
         "baselines": baselines,
         "baseline_path": source_path,
-        "patterns": sensor_patterns
+        "patterns": sensor_patterns,
+        "unmapped_entities": unmapped_entities
     }
