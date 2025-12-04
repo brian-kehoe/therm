@@ -69,8 +69,11 @@ def get_processed_data(files, user_config):
 
         # --- NEW: capability detection ---
         has_flowrate = "FlowRate" in df.columns and df["FlowRate"].notna().any()
+        has_heat_sensor = "Heat" in df.columns and pd.to_numeric(df["Heat"], errors="coerce").fillna(0).abs().sum() > 0
         caps = st.session_state.get("capabilities", {})
         caps["has_flowrate"] = has_flowrate
+        caps["has_heat_sensor"] = has_heat_sensor
+        caps["has_energy_channel"] = has_flowrate or has_heat_sensor
         st.session_state["capabilities"] = caps
 
         status_container.update(label="Processing Complete!", state="complete", expanded=False)
@@ -142,10 +145,11 @@ if uploaded_files:
             if data:
                 caps = st.session_state.get("capabilities", {})
                 has_flowrate = caps.get("has_flowrate", True)
+                has_energy_channel = caps.get("has_energy_channel", True)
 
-                if not has_flowrate:
+                if not has_energy_channel:
                     st.info(
-                        "Flow sensor not mapped - energy output (Heat kWh), COP and SCOP are disabled. "
+                        "No Flow Rate or Heat output sensor mapped — energy output (Heat kWh), COP and SCOP are disabled. "
                         "The dashboard is running in Power & Temps only mode."
                     )
 
