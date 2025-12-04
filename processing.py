@@ -237,6 +237,7 @@ def detect_runs(df, user_config=None):
         # Averages
         avg_outdoor = group['OutdoorTemp'].mean() if 'OutdoorTemp' in group.columns else 0
         avg_flow = group['FlowTemp'].mean()
+        avg_flow_rate = group['FlowRate'].mean() if 'FlowRate' in group.columns else 0
         
         # Metrics
         heat_kwh = group['Heat'].sum() / 60000.0
@@ -278,7 +279,7 @@ def detect_runs(df, user_config=None):
             "avg_outdoor": round(avg_outdoor, 1),
             "avg_flow_temp": round(avg_flow, 1),
             "avg_dt": round(group['DeltaT'].mean(), 1),
-            "avg_flow_rate": round(group['FlowRate'].mean(), 1),
+            "avg_flow_rate": round(avg_flow_rate, 1),
             "run_cop": round(cop, 2),
             "heat_kwh": heat_kwh,
             "electricity_kwh": elec_kwh,
