@@ -40,7 +40,7 @@ RECOMMENDED_SENSORS = {
         "label": "Flow Rate", 
         "unit": "L/min", 
         "required": False,
-        "description": "Water flow rate in the primary circuit."
+        "description": "Water flow rate in the primary circuit. Required for accurate Heat output and COP. If not mapped, the app runs in 'Power & Temps only' mode with no energy or COP metrics."
     },
     "OutdoorTemp": {
         "label": "Outdoor Temperature", 
@@ -55,7 +55,7 @@ OPTIONAL_SENSORS = {
     # DHW Sensors
     "DHW_Temp": {
         "label": "DHW Tank Temperature", 
-        "unit": "Â°C", 
+        "unit": "AøC", 
         "required": False,
         "description": "Current temperature of the hot water cylinder."
     },
@@ -80,10 +80,18 @@ OPTIONAL_SENSORS = {
     
     # Advanced Diagnostics
     "Indoor_Power": {
-        "label": "Indoor Unit / Immersion Power", 
+        "label": "Indoor Unit Power (optional)", 
         "unit": "W", 
         "required": False,
-        "description": "Power consumption of the indoor unit or immersion heater."
+        "description": "Indoor unit / compressor cabinet power draw, used as a proxy for immersion & ghost pumping."
+    },
+
+    # NEW: direct heat-output sensor
+    "Heat": {
+        "label": "Heat Output (optional)",
+        "unit": "W",
+        "required": False,
+        "description": "Thermal output of the heat pump in Watts (space + DHW). Use if your system already exposes a heat output sensor."
     },
     "Freq": {
         "label": "Compressor Frequency", 
@@ -97,9 +105,7 @@ OPTIONAL_SENSORS = {
         "required": False,
         "description": "Binary sensor indicating if defrost cycle is active."
     },
-}
-
-# 4. Zone Sensors
+}# 4. Zone Sensors
 ZONE_SENSORS = {
     "Zone_1": {
         "label": "Zone 1 (Call for Heat)", 
@@ -263,3 +269,5 @@ def get_missing_columns(df, feature_name):
         return []
     requirements = REQUIRED_COLUMNS[feature_name]
     return [req for req in requirements if req not in df.columns]
+
+

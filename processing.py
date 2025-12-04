@@ -29,45 +29,22 @@ def get_friendly_name(internal_key, user_config):
 
 def calculate_physics_metrics(df):
     d = df.copy()
-    
-    # Compressor Status
-    # Safety Check: Ensure PHYSICS_THRESHOLDS is a dict
-    if isinstance(PHYSICS_THRESHOLDS, dict):
-        freq_min = PHYSICS_THRESHOLDS.get('freq_min', 15)
-        power_min = PHYSICS_THRESHOLDS.get('power_min', 50)
-    else:
-        freq_min = 15
-        power_min = 50
-    
-    if 'Freq' in d.columns:
-        is_compressor_on = d['Freq'] > freq_min
-    else:
-        is_compressor_on = d['Power'] > power_min
-
     # Delta T
     if 'DeltaT' not in d.columns:
         d['DeltaT'] = d['FlowTemp'] - d['ReturnTemp']
-    
-    # Heat Output
-    if 'Heat' not in d.columns or d['Heat'].sum() == 0:
-        d['Heat'] = d['FlowRate'] * SPECIFIC_HEAT_CAPACITY * d['DeltaT']
-        d['Heat'] = d['Heat'].clip(lower=0)
-        d.loc[~is_compressor_on, 'Heat'] = 0
 
     return d
 
 def apply_gatekeepers(df, user_config=None):
     d = df.copy()
     
+    thresholds = PHYSICS_THRESHOLDS if isinstance(PHYSICS_THRESHOLDS, dict) else {}
+
     # 1. Physics
     d = calculate_physics_metrics(d)
 
     # 2. Activity
-    if isinstance(PHYSICS_THRESHOLDS, dict):
-        power_min = PHYSICS_THRESHOLDS.get('power_min', 50)
-    else:
-        power_min = 50
-
+    power_min = thresholds.get('power_min', 50)
     d['is_active'] = (d['Power'] > power_min).astype(int)
     
     # 3. Detect DHW Mode
@@ -88,13 +65,53 @@ def apply_gatekeepers(df, user_config=None):
     d['is_DHW'] = is_dhw_mask
     d['is_heating'] = (d['is_active'] == 1) & (~d['is_DHW'])
 
-    # 4. Power Splits
+    # --- HEAT OUTPUT LOGIC ---
+    has_flow = 'FlowRate' in d.columns
+    has_heat_col = 'Heat' in d.columns
+    has_heat_data = False
+
+    if has_heat_col:
+        # treat NaN as 0 when checking whether we have any signal
+        heat_series = pd.to_numeric(d['Heat'], errors='coerce').fillna(0)
+        has_heat_data = heat_series.abs().sum() > 0
+        d['Heat'] = heat_series  # normalise type
+
+    if not has_heat_data:
+        if has_flow:
+            # Only derive when we have hydraulics
+            min_flow = thresholds.get("min_flow_rate_lpm", 0)
+            min_freq = thresholds.get("min_freq_for_heat", 0)
+
+            flow = pd.to_numeric(d['FlowRate'], errors='coerce').fillna(0)
+            delta_t = pd.to_numeric(d.get('DeltaT', 0), errors='coerce').fillna(0)
+            freq = pd.to_numeric(d.get('Freq', 0), errors='coerce').fillna(0)
+
+            # Basic physics: Heat [W] = c * m_dot * ΔT
+            heat_raw = SPECIFIC_HEAT_CAPACITY * flow * delta_t
+
+            # Gatekeepers
+            valid = (
+                (flow >= min_flow) &
+                (freq >= min_freq) &
+                (delta_t.abs() >= thresholds.get("min_valid_delta_t", 0)) &
+                (delta_t.abs() <= thresholds.get("max_valid_delta_t", 999))
+            )
+
+            d['Heat'] = 0.0
+            d.loc[valid, 'Heat'] = heat_raw[valid]
+            # No heat when compressor off
+            d.loc[~d['is_active'].astype(bool), 'Heat'] = 0.0
+        else:
+            # No Heat sensor and no FlowRate → no energy channel
+            d['Heat'] = 0.0
+
+    # 4. Power & Heat Splits
     d['Power_Heating'] = np.where(d['is_heating'], d['Power'], 0)
     d['Power_DHW'] = np.where(d['is_DHW'], d['Power'], 0)
     d['Heat_Heating'] = np.where(d['is_heating'], d['Heat'], 0)
-    d['Heat_DHW'] = np.where(d['is_DHW'], d['Heat'], 0)
+    d['Heat_DHW']     = np.where(d['is_DHW'],     d['Heat'], 0)
     
-    d['COP_Real'] = safe_div(d['Heat'], d['Power'])
+    d['COP_Real']  = safe_div(d['Heat'], d['Power'])
     d['COP_Graph'] = d['COP_Real'].clip(0, 6)
 
     # 5. Zone Config Strings
@@ -143,6 +160,53 @@ def apply_gatekeepers(df, user_config=None):
     
     d['Current_Rate'] = np.where(d['is_night_rate'], rate_night, rate_day)
     d['Cost_Inc'] = (d['Power'] / 1000 / 60) * d['Current_Rate']
+
+    # --- HEAT OUTPUT LOGIC ---
+    has_flow = 'FlowRate' in d.columns
+    has_heat_col = 'Heat' in d.columns
+    has_heat_data = False
+
+    if has_heat_col:
+        # treat NaN as 0 when checking whether we have any signal
+        heat_series = pd.to_numeric(d['Heat'], errors='coerce').fillna(0)
+        has_heat_data = heat_series.abs().sum() > 0
+        d['Heat'] = heat_series  # normalise type
+
+    if not has_heat_data:
+        if has_flow:
+            # Only derive when we have hydraulics
+            min_flow = PHYSICS_THRESHOLDS.get("min_flow_rate_lpm", 0)
+            min_freq = PHYSICS_THRESHOLDS.get("min_freq_for_heat", 0)
+
+            flow = pd.to_numeric(d['FlowRate'], errors='coerce').fillna(0)
+            delta_t = pd.to_numeric(d.get('DeltaT', 0), errors='coerce').fillna(0)
+            freq = pd.to_numeric(d.get('Freq', 0), errors='coerce').fillna(0)
+
+            # Basic physics: Heat [W] = c * m_dot * ΔT
+            heat_raw = SPECIFIC_HEAT_CAPACITY * flow * delta_t
+
+            # Gatekeepers
+            valid = (
+                (flow >= min_flow) &
+                (freq >= min_freq) &
+                (delta_t.abs() >= PHYSICS_THRESHOLDS.get("min_valid_delta_t", 0)) &
+                (delta_t.abs() <= PHYSICS_THRESHOLDS.get("max_valid_delta_t", 999))
+            )
+
+            d['Heat'] = 0.0
+            d.loc[valid, 'Heat'] = heat_raw[valid]
+            # No heat when compressor off
+            d.loc[~d['is_active'].astype(bool), 'Heat'] = 0.0
+        else:
+            # No Heat sensor and no FlowRate → no energy channel
+            d['Heat'] = 0.0
+
+    # --- existing splits + COP ---
+    d['Heat_Heating'] = np.where(d['is_heating'], d['Heat'], 0)
+    d['Heat_DHW']     = np.where(d['is_DHW'],     d['Heat'], 0)
+
+    d['COP_Real']  = safe_div(d['Heat'], d['Power'])
+    d['COP_Graph'] = d['COP_Real'].clip(0, 6)
 
     return d
 

@@ -67,9 +67,15 @@ def get_processed_data(files, user_config):
         runs = processing.detect_runs(df, user_config)
         
         # 4. Daily Stats
-        status_container.write("📊 Calculating daily stats...")
+        status_container.write("Calculating daily stats...")
         daily = processing.get_daily_stats(df)
-        
+
+        # --- NEW: capability detection ---
+        has_flowrate = 'FlowRate' in df.columns and df['FlowRate'].notna().any()
+        caps = st.session_state.get("capabilities", {})
+        caps["has_flowrate"] = has_flowrate
+        st.session_state["capabilities"] = caps
+
         status_container.update(label="Processing Complete!", state="complete", expanded=False)
         
         # Save to Cache
@@ -137,6 +143,12 @@ if uploaded_files:
 
             # 4. Render Dashboard
             if data:
+                caps = st.session_state.get("capabilities", {})
+                has_flowrate = caps.get("has_flowrate", True)
+
+                if not has_flowrate:
+                    st.info("Flow sensor not mapped - energy output (Heat kWh), COP and SCOP are disabled. The dashboard is running in **Power & Temps only** mode.")
+
                 mode = st.sidebar.radio("Analysis Mode", ["Long-Term Trends", "Run Inspector", "Data Quality Audit"])
                 
                 # Context injection
@@ -157,3 +169,6 @@ else:
     st.sidebar.markdown("---")
     with st.sidebar.expander("ℹ️ About therm"):
         st.markdown("**therm v2.0** - Heat Pump Performance Analysis")
+
+
+
