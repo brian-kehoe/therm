@@ -217,7 +217,7 @@ def load_and_clean_data(files, user_config, progress_cb=None):
     # ----------------------------------------------------------------------
 
     # Fill small gaps (limited ffill to avoid masking real outages)
-    combined_df = combined_df.ffill(limit=120)
+    combined_df = combined_df.ffill(limit=60)
 
     return {
         "df": combined_df,
