@@ -242,16 +242,36 @@ def render_data_quality(
 
         mapped_keys = set(mapping.keys())
 
+        # Canonical UI labels for standardised core data points
+        STANDARD_LABELS = {
+            "Power": "Outdoor Power",
+            "Indoor_Power": "Indoor Power",
+            "Heat": "Heat Output",
+            "FlowTemp": "Flow Temp",
+            "ReturnTemp": "Return Temp",
+            "ValveMode": "3 Way Valve",
+            "OutdoorTemp": "Outdoor Temp",
+            "DHW_Temp": "Hot Water Temp",
+            "Freq": "Compressor Freq",
+        }
+
         # Derived / internal-only names that should NEVER appear in All Sensors
         DERIVED_NAMES = {
-            "DeltaT", "COP_Real", "COP_Graph",
+            "DeltaT",
+            "COP_Real",
+            "COP_Graph",
             "Active_Zones_Count",
-            "hour", "is_night_rate", "Current_Rate",
+            "hour",
+            "is_night_rate",
+            "Current_Rate",
             "Zone_Config",
-            "Immersion_Active", "Immersion_Power",
+            "Immersion_Active",
+            "Immersion_Power",
             "Cost_Inc",
-            "Electricity_Heating_Wmin", "Electricity_DHW_Wmin",
-            "Heat_Heating_Wmin", "Heat_DHW_Wmin",
+            "Electricity_Heating_Wmin",
+            "Electricity_DHW_Wmin",
+            "Heat_Heating_Wmin",
+            "Heat_DHW_Wmin",
             "Immersion_Wh",
         }
 
@@ -268,13 +288,34 @@ def render_data_quality(
             return name in mapped_keys
 
         def display_label_for(internal_name: str) -> str:
-            """
-            What the user sees on the front end.
+                """
+                What the user sees on the front end.
 
-            Requirement: show the sensor name that was mapped (the entity_id),
-            not internal placeholders like Zone_1 / Room_1 / 1,2,3 etc.
+                - Zones & Rooms: always show the mapped sensor name (entity_id).
+                - Standard core sensors: show FRIENDLY labels (Outdoor Power, Flow Temp, etc.).
+                - Everything else: mapped entity_id, or internal name if unmapped.
+                """
+                # Zones and Rooms → display the individual mapped sensor names
+                if internal_name.startswith("Zone_") or internal_name.startswith("Room_"):
+                    return str(mapping.get(internal_name, internal_name))
+
+                # Core standardised signals → friendly label
+                if internal_name in STANDARD_LABELS:
+                    return STANDARD_LABELS[internal_name]
+
+                # Default → mapped entity id (or internal name)
+                return str(mapping.get(internal_name, internal_name))
+
+
+        def tooltip_label_for(internal_name: str) -> str:
             """
-            return str(mapping.get(internal_name, internal_name))
+            Tooltip content: show the mapped sensor (entity_id),
+            and optionally the internal name for debugging context.
+            """
+            entity = mapping.get(internal_name, internal_name)
+            if entity == internal_name:
+                return str(entity)
+            return f"{entity} (internal: {internal_name})"
 
         # 1. Build Data (counts -> availability % or raw event counts)
         count_cols = [
@@ -316,7 +357,7 @@ def render_data_quality(
                 st.info("No mapped sensor count columns found in daily data.")
             else:
                 # 2. Re-construct Ordered Columns (Events moved to end)
-                column_meta = []   # list of dicts: {category, internal, display}
+                column_meta = []   # list of dicts: {category, internal, display, tooltip}
                 valid_data_cols: list[str] = []
                 events_cat: str | None = None
                 events_list: list[str] = []
@@ -341,6 +382,7 @@ def render_data_quality(
                                 "category": cat_name,
                                 "internal": s,
                                 "display": display_label_for(s),
+                                "tooltip": tooltip_label_for(s),
                             }
                         )
                         valid_data_cols.append(s)
@@ -359,6 +401,7 @@ def render_data_quality(
                                 "category": zones_cat_name,
                                 "internal": z,
                                 "display": display_label_for(z),
+                                "tooltip": tooltip_label_for(z),
                             }
                         )
                         valid_data_cols.append(z)
@@ -375,8 +418,9 @@ def render_data_quality(
                         {
                             "category": "️ Rooms",
                             "internal": r,
-                            # Show mapped entity, not "Room_1"/"1"
+                                # Show friendly label or entity ID, not "Room_1"/"1"
                             "display": display_label_for(r),
+                            "tooltip": tooltip_label_for(r),
                         }
                     )
                     valid_data_cols.append(r)
@@ -395,6 +439,7 @@ def render_data_quality(
                             "category": "Other",
                             "internal": rem,
                             "display": display_label_for(rem),
+                            "tooltip": tooltip_label_for(rem),
                         }
                     )
                     valid_data_cols.append(rem)
@@ -408,6 +453,7 @@ def render_data_quality(
                                 "category": events_cat,
                                 "internal": s,
                                 "display": display_label_for(s),
+                                "tooltip": tooltip_label_for(s),
                             }
                         )
                         valid_data_cols.append(s)
@@ -416,6 +462,7 @@ def render_data_quality(
                 df_final = df_flat[valid_data_cols].copy()
                 df_final = format_dq_df(df_final)
 
+                # Build MultiIndex columns from category + display label
                 multi_cols = pd.MultiIndex.from_tuples(
                     [(m["category"], m["display"]) for m in column_meta]
                 )
@@ -433,21 +480,29 @@ def render_data_quality(
                     else:
                         normal_cols.append(col_tuple)
 
-                styler = df_final.style.format("{:.0f}", na_rep="-")
-                if normal_cols:
-                    styler = styler.background_gradient(
-                        subset=normal_cols, cmap="RdYlGn", vmin=0, vmax=100,
-                    )
-                if event_cols:
-                    # Grey background for event-style sensors
-                    styler = styler.map(
-                        lambda x: "background-color: #e0e0e0; color: #555555",
-                        subset=event_cols,
-                    )
+            styler = df_final.style.format("{:.0f}", na_rep="-")
+            if normal_cols:
+                styler = styler.background_gradient(
+                    subset=normal_cols, cmap="RdYlGn", vmin=0, vmax=100,
+                )
+            if event_cols:
+                # Grey background for event-style sensors
+                styler = styler.map(
+                    lambda x: "background-color: #e0e0e0; color: #555555",
+                    subset=event_cols,
+                )
 
-                st.dataframe(styler, width="stretch")
+            # NOTE:
+            # We intentionally do NOT use Styler tooltips here because Streamlit
+            # will escape the HTML and show it in the cells instead of rendering
+            # proper hover-tooltips. Column headers already show the correct
+            # standard labels (or entity_ids for Rooms/Zones).
+
+            st.dataframe(styler, width="stretch")
+
         else:
             st.info("No count-based columns found in daily data.")
+
 
 
 
