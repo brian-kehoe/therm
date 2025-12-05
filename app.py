@@ -88,25 +88,52 @@ with st.sidebar.expander("Data source & files", expanded=in_system_setup):
     if uploaded_files:
         st.session_state["uploaded_filenames"] = [f.name for f in uploaded_files]
 
+        # ------------------------------------------------------------------
+        # New: per-file source selector (Grafana vs Home Assistant)
+        # ------------------------------------------------------------------
+        # Initialise or refresh the file_sources mapping
+        file_sources = st.session_state.get("file_sources", {})
+
+        st.markdown("**File source type:**")
+        for idx, f in enumerate(uploaded_files):
+            fname = getattr(f, "name", f"file_{idx}")
+            # Default to existing choice if present, else assume Grafana/Influx
+            default_source = file_sources.get(fname, "grafana")
+
+            source_label = st.radio(
+                label=f"Source for `{fname}`",
+                options=["Grafana / Influx CSV", "Home Assistant CSV"],
+                index=0 if default_source == "grafana" else 1,
+                key=f"file_source_{idx}",
+            )
+
+            # Normalise to a simple internal code
+            internal_code = "grafana" if source_label.startswith("Grafana") else "ha"
+            file_sources[fname] = internal_code
+
+        # Store back in session state so other modules can use it
+        st.session_state["file_sources"] = file_sources
+        # ------------------------------------------------------------------
+
     if "uploaded_filenames" in st.session_state:
         st.markdown("**Loaded files:**")
         for name in st.session_state["uploaded_filenames"]:
             st.markdown(f"- `{name}`")
 
-        # Optional: allow the user to hard-reset everything
-        if st.button("Clear files and start again", type="secondary"):
-            for key in [
-                "system_config",
-                "cached",
-                "uploaded_filenames",
-                "capabilities",
-            ]:
-                st.session_state.pop(key, None)
+    # Optional: allow the user to hard-reset everything
+    if st.button("Clear files and start again", type="secondary"):
+        for key in [
+            "system_config",
+            "cached",
+            "uploaded_filenames",
+            "capabilities",
+            "file_sources",  # NEW: clear file source mapping as well
+        ]:
+            st.session_state.pop(key, None)
+        # Force the file_uploader to re-mount with a fresh key
+        st.session_state["csv_uploader_version"] += 1
+        st.rerun()
 
-            # Force the file_uploader to re-mount with a fresh key
-            st.session_state["csv_uploader_version"] += 1
-
-            st.rerun()
 
 
 
