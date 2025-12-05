@@ -47,8 +47,8 @@ def get_friendly_name(internal_key, user_config) -> str:
 
 def calculate_physics_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate physics-derived metrics that can be inferred cheaply from existing
-    columns. Currently this just ensures DeltaT exists.
+    Calculate physics-derived metrics that can be inferred cheaply from existing columns.
+    Currently this just ensures DeltaT exists.
     """
     d = df.copy()
 
@@ -59,10 +59,34 @@ def calculate_physics_metrics(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
+# --- DEBUG HELPERS (optional) ------------------------------------------------
+def _debug_engine_state(d: pd.DataFrame, label: str = "") -> None:
+    """
+    Lightweight debug helper to inspect the internal physics engine state.
+    Controlled by st.session_state['debug_engine']; safe to call in production.
+    """
+    try:
+        import streamlit as st  # already imported at top, but safe
+    except Exception:
+        return
+
+    if not st.session_state.get("debug_engine", False):
+        return
+
+    cols = [c for c in ["Power", "Heat", "FlowRate", "DeltaT", "Freq"] if c in d.columns]
+    summary: dict[str, float | int] = {"rows": int(len(d))}
+    for col in cols:
+        ser = pd.to_numeric(d[col], errors="coerce").fillna(0)
+        summary[f"{col}_nonzero"] = int((ser != 0).sum())
+        summary[f"{col}_min"] = float(ser.min())
+        summary[f"{col}_max"] = float(ser.max())
+    st.write(f"🔧 Engine debug – {label}")
+    st.json(summary)
+
+
 # --- HEAT + COP ENGINE -------------------------------------------------------
-
-
 def _ensure_heat_and_cop(
+
     d: pd.DataFrame, thresholds: dict | None = None
 ) -> pd.DataFrame:
     """
@@ -100,21 +124,42 @@ def _ensure_heat_and_cop(
             delta_t = pd.to_numeric(d.get("DeltaT", 0), errors="coerce").fillna(0)
             freq = pd.to_numeric(d.get("Freq", 0), errors="coerce").fillna(0)
 
-            # Basic physics: Heat [W] = c * m_dot * ΔT
-            heat_raw = SPECIFIC_HEAT_CAPACITY * flow * delta_t
+        # Basic physics: Heat [W] = c * m_dot * ΔT
+        heat_raw = SPECIFIC_HEAT_CAPACITY * flow * delta_t
 
-            # Gatekeepers
-            min_dt = thresholds.get("min_valid_delta_t", 0)
-            max_dt = thresholds.get("max_valid_delta_t", 999)
-            valid = (
-                (flow >= min_flow)
-                & (freq >= min_freq)
-                & (delta_t.abs() >= min_dt)
-                & (delta_t.abs() <= max_dt)
-            )
+        # Gatekeepers
+        min_dt = thresholds.get("min_valid_delta_t", 0)
+        max_dt = thresholds.get("max_valid_delta_t", 999)
 
-            d["Heat"] = 0.0
-            d.loc[valid, "Heat"] = heat_raw[valid]
+        valid = (
+            (flow >= min_flow)
+            & (freq >= min_freq)
+            & (delta_t.abs() >= min_dt)
+            & (delta_t.abs() <= max_dt)
+        )
+
+        d["Heat"] = 0.0
+        d.loc[valid, "Heat"] = heat_raw[valid]
+
+        # Optional: debug gatekeepers
+        try:
+            import streamlit as st
+            if st.session_state.get("debug_engine", False):
+                st.write(
+                    "🔍 Heat gatekeepers",
+                    {
+                        "rows_total": int(len(d)),
+                        "rows_flow_gt0": int((flow > 0).sum()),
+                        "rows_valid": int(valid.sum()),
+                        "min_flow_threshold": float(min_flow),
+                        "min_freq_threshold": float(min_freq),
+                        "min_dt_threshold": float(min_dt),
+                        "max_dt_threshold": float(max_dt),
+                    },
+                )
+        except Exception:
+            pass
+
 
             # No heat when compressor off
             if "is_active" in d.columns:
@@ -123,12 +168,22 @@ def _ensure_heat_and_cop(
             # No Heat sensor and no FlowRate → no energy channel
             d["Heat"] = 0.0
 
+    # ------------------------------------------------------------------
+    # FIX: Negative Power readings from Home Assistant
+    # Some HA monitors report small negative consumption values (e.g. -2.3 W).
+    # If not corrected → is_active=0 → no Heat → no COP → blank charts.
+    # ------------------------------------------------------------------
+    if "Power" in d.columns:
+        d["Power"] = pd.to_numeric(d["Power"], errors="coerce").fillna(0)
+        d["Power"] = d["Power"].abs()
+
     # --- Power & Heat Splits + COP ---
     is_heating = d.get("is_heating", 0).astype(bool)
     is_dhw = d.get("is_DHW", 0).astype(bool)
 
     d["Power_Heating"] = np.where(is_heating, d["Power"], 0)
     d["Power_DHW"] = np.where(is_dhw, d["Power"], 0)
+
 
     d["Heat_Heating"] = np.where(is_heating, d["Heat"], 0)
     d["Heat_DHW"] = np.where(is_dhw, d["Heat"], 0)
@@ -291,22 +346,24 @@ def get_rate_for_timestamp(ts, tariff_structure, default_rate: float = 0.35) -> 
 def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.DataFrame:
     """
     Core "engine" that:
-      - Normalises physics fields (DeltaT)
-      - Classifies activity + DHW/Heating
-      - Ensures Heat + splits + COP
-      - Derives Zone configuration strings
-      - Infers Immersion activity/power
-      - Applies tariff to build incremental cost
+        - Normalises physics fields (DeltaT)
+        - Classifies activity + DHW/Heating
+        - Ensures Heat + splits + COP
+        - Derives Zone configuration strings
+        - Infers Immersion activity/power
+        - Applies tariff to build incremental cost
     """
     d = df.copy()
     thresholds = PHYSICS_THRESHOLDS if isinstance(PHYSICS_THRESHOLDS, dict) else {}
 
     # 1. Physics
     d = calculate_physics_metrics(d)
+    _debug_engine_state(d, "after physics (DeltaT)")
 
     # 2. Activity
     power_min = thresholds.get("power_min", 50)
     d["is_active"] = (d["Power"] > power_min).astype(int)
+
 
     # 3. Detect DHW Mode
     is_dhw_mask = pd.Series(False, index=d.index)
@@ -336,8 +393,12 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
     d["is_DHW"] = is_dhw_mask
     d["is_heating"] = (d["is_active"] == 1) & (~d["is_DHW"])
 
+    _debug_engine_state(d, "after activity flags")
+
     # 4. HEAT + SPLITS + COP (single canonical implementation)
     d = _ensure_heat_and_cop(d, thresholds)
+    _debug_engine_state(d, "after heat/COP")
+
 
     # 5. Zone Config Strings
     zone_cols = get_active_zone_columns(d)

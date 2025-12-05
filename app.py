@@ -314,13 +314,51 @@ if uploaded_files:
 
                 # --- Data Debugger at the bottom ---
                 with st.expander("Data Debugger", expanded=False):
-                    st.write("**Full Config:**")
-                    st.json(st.session_state["system_config"])
-                    if data and "df" in data:
-                        st.write("**Columns:**", list(data["df"].columns))
-                    if data and data.get("runs"):
+                    # Toggle for engine-level debug traces in processing.py
+                    debug_flag = st.checkbox(
+                        "Enable engine debug traces",
+                        value=st.session_state.get("debug_engine", False),
+                    )
+                    st.session_state["debug_engine"] = debug_flag
+
+                    # Show config only if it exists
+                    config = st.session_state.get("system_config")
+                    if config is not None:
+                        st.write("**Full Config:**")
+                        st.json(config)
+                    else:
+                        st.write("**Full Config:** (no system_config in session state yet)")
+
+                    # Show dataframe core columns if data is present
+                    if data is not None and "df" in data:
+                        df_dbg = data["df"]
+                        st.write("**Columns:**", list(df_dbg.columns))
+
+                        core_cols = [
+                            c
+                            for c in [
+                                "Power",
+                                "Heat",
+                                "FlowTemp",
+                                "ReturnTemp",
+                                "FlowRate",
+                                "DeltaT",
+                                "is_active",
+                                "is_DHW",
+                                "is_heating",
+                            ]
+                            if c in df_dbg.columns
+                        ]
+                        if core_cols:
+                            st.write("**Core engine columns (head):**")
+                            st.dataframe(df_dbg[core_cols].head(50))
+
+                    # Runs summary (also guarded)
+                    if data is not None and data.get("runs"):
                         st.write(f"Detected {len(data['runs'])} runs")
                         st.write(f"Run 0 Type: {data['runs'][0]['run_type']}")
+
+
 
 
             # 3. Render Dashboard (main panel)
