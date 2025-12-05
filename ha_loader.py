@@ -1,247 +1,197 @@
 # ha_loader.py
-#
-# Home Assistant CSV loader for v2.5
-# Goal: produce a wide, 1-minute dataframe with the same column
-# names the existing processing pipeline expects (Freq, Power, Heat,
-# FlowTemp, ReturnTemp, DHW_Temp, ValveMode, etc.).
-#
-# This is distilled from your "Heat Pump Analysis - 11pm 02-12-2025
-# Claude Refactor 3" logic, but simplified for HA-only use. :contentReference[oaicite:2]{index=2}
-
-from __future__ import annotations
+# Home Assistant → Engine-ready dataframe loader for THERM
+# Fully compatible with v2.75 app structure
 
 import pandas as pd
 import numpy as np
-from typing import Callable, Iterable, Optional, Dict, Any
-
-import streamlit as st  # same pattern as data_loader/processing
-
-from config import ENTITY_MAP  # friendly-name mapping for your entities
-from processing import apply_gatekeepers, detect_runs, get_daily_stats
+from typing import List, Dict, Any, Callable, Optional
+from inspector import is_binary_sensor, safe_smart_parse
+import processing
 
 
-def _normalize_ha_columns(df: pd.DataFrame) -> pd.DataFrame:
+# ----------------------------------------------------------------------
+# HELPERS
+# ----------------------------------------------------------------------
+
+def _infer_dtype(series: pd.Series) -> str:
     """
-    Normalise Home Assistant CSV columns to:
-      - last_changed (datetime)
-      - entity_id (lowercase string)
-      - state (string/numeric)
+    Infer dtype for a single sensor based on HA long-form 'state' series.
+    Returns: "binary", "numeric", or "string".
     """
-    df = df.copy()
+    values = series.dropna().astype(str)
 
-    # Trim weird characters / BOMs
-    cleaned_cols = []
-    for c in df.columns:
-        c = str(c).strip().strip('"').strip("'").replace("\r", "").replace("\n", "").replace("\ufeff", "")
-        cleaned_cols.append(c)
-    df.columns = cleaned_cols
+    # 1. Binary?
+    if is_binary_sensor(values):
+        return "binary"
 
-    # Normalise time column
-    if "last_changed" in df.columns:
-        time_col = "last_changed"
-    elif "last_updated" in df.columns:
-        df = df.rename(columns={"last_updated": "last_changed"})
-        time_col = "last_changed"
-    elif "time" in df.columns:
-        df = df.rename(columns={"time": "last_changed"})
-        time_col = "last_changed"
+    # 2. Mostly numeric?
+    _, mostly_numeric = safe_smart_parse(values)
+    if mostly_numeric:
+        return "numeric"
+
+    # 3. Fallback
+    return "string"
+
+
+def _convert_value(val, dtype: str):
+    """
+    Convert HA 'state' values to proper Python values.
+    """
+    if dtype == "binary":
+        s = str(val).strip().lower()
+        return 1 if s in ("on", "true", "1", "yes") else 0
+
+    elif dtype == "numeric":
+        try:
+            return float(val)
+        except Exception:
+            return np.nan
+
     else:
-        # Fallback: assume first column is timestamp
-        time_col = df.columns[0]
-        df = df.rename(columns={time_col: "last_changed"})
-        time_col = "last_changed"
-
-    # Normalise state/value column
-    if "state" not in df.columns and "value" in df.columns:
-        df = df.rename(columns={"value": "state"})
-    if "state" not in df.columns:
-        # If still missing, create a dummy state (will be mostly useless)
-        df["state"] = np.nan
-
-    # Normalise entity column
-    if "entity_id" not in df.columns and "entity" in df.columns:
-        df = df.rename(columns={"entity": "entity_id"})
-    if "entity_id" not in df.columns:
-        # Try to infer from a column name like "sensor.heat_pump_power_ch1"
-        # This is a best-effort fallback for wide HA exports, but the expectation
-        # is that you export in long format (entity_id column present).
-        raise ValueError("HA CSV must contain an 'entity_id' (or 'entity') column.")
-
-    # Parse time + basic cleaning
-    df["last_changed"] = pd.to_datetime(df["last_changed"], errors="coerce", dayfirst=True)
-    df = df.dropna(subset=["last_changed"])
-
-    df["entity_id"] = df["entity_id"].astype(str).str.lower()
-    df["state"] = df["state"].astype(str).str.strip()
-
-    return df[["last_changed", "entity_id", "state"]].copy()
+        return val
 
 
-def _clean_binary_state(x: Any) -> float:
+# ----------------------------------------------------------------------
+# MAIN ENTRY POINT
+# ----------------------------------------------------------------------
+
+def process_ha_files(
+    files: List[Any],
+    user_config: Dict[str, Any],
+    progress_cb: Optional[Callable[[str, float], None]] = None,
+) -> Optional[Dict[str, Any]]:
     """
-    Convert HA-style binary states to 0/1 (or numeric value if already numeric).
+    Load Home Assistant long-form CSV(s), convert to wide 1-minute data,
+    apply user mapping, run physics, detect runs, and compute daily stats.
+
+    Returns dict with:
+        df         → engine dataframe
+        raw_history→ dataframe pre-physics
+        runs       → list of runs
+        daily      → daily energy table
+        patterns   → None (HA mode does not use patterns yet)
+        baselines  → None (HA mode does not use heartbeats yet)
     """
-    s = str(x).strip().lower()
-    if s in ("on", "true", "1"):
-        return 1.0
-    if s in ("off", "false", "0", ""):
-        return 0.0
-    try:
-        return float(s)
-    except Exception:
-        return 0.0
 
-
-def load_ha_dataframe(
-    uploaded_files: Iterable[Any],
-    progress_cb: Optional[Callable[[str, int], None]] = None,
-) -> Optional[pd.DataFrame]:
-    """
-    Load one or more Home Assistant CSV exports and return a
-    wide, 1-minute-resampled dataframe with friendly column names.
-
-    This is intentionally simpler than the Grafana loader:
-    - No pairing of Numeric/State files
-    - Assumes long-format HA history (last_changed/entity_id/state)
-    """
-    files = list(uploaded_files)
-    if not files:
-        return None
-
-    if progress_cb:
-        progress_cb("Loading Home Assistant CSV…", 10)
-
+    # ------------------------------------------------------------------
+    # 1. LOAD CSVs
+    # ------------------------------------------------------------------
     dfs = []
-    for f in files:
+    total = len(files)
+
+    for i, f in enumerate(files):
+        if progress_cb:
+            progress_cb(f"Reading HA CSV {i+1}/{total}", (i + 1) / total)
         f.seek(0)
         df = pd.read_csv(f)
-        df = _normalize_ha_columns(df)
-
-        # Filter to mapped entities only
-        df["entity_id"] = df["entity_id"].astype(str).str.lower()
-        df = df[df["entity_id"].isin(ENTITY_MAP.keys())].copy()
-
-        if df.empty:
-            continue
-
         dfs.append(df)
 
     if not dfs:
         return None
 
-    full_df = pd.concat(dfs, ignore_index=True).sort_values("last_changed")
+    long = pd.concat(dfs, ignore_index=True)
 
-    # Binary entities: on/off → 1/0
-    binary_mask = (
-        full_df["entity_id"].str.startswith("binary_")
-        | full_df["entity_id"].str.contains("defrost")
-    )
-    full_df.loc[binary_mask, "state"] = full_df.loc[binary_mask, "state"].map(_clean_binary_state)
-
-    if progress_cb:
-        progress_cb("Pivoting to wide format…", 30)
-
-    # Pivot to wide (entity_id columns)
-    df_pivot = full_df.pivot_table(
-        index="last_changed",
-        columns="entity_id",
-        values="state",
-        aggfunc="last",
-    )
-
-    # 1-minute resample; for downsampled HA data this creates a continuous series
-    # We use a simple forward-fill; the physics gatekeepers will still impose
-    # thresholds on Power/Freq/etc when deciding what is "active".
-    df_resampled = df_pivot.resample("1min").ffill()
-
-    if progress_cb:
-        progress_cb("Renaming entities…", 50)
-
-    # Map HA entity_ids → friendly column names used by processing.py
-    df_resampled = df_resampled.rename(columns=ENTITY_MAP)
-
-    # Normalise a few categorical/state-like columns before numeric coercion
-    if "Immersion_Mode" in df_resampled.columns:
-        df_resampled["Immersion_Mode"] = df_resampled["Immersion_Mode"].apply(
-            lambda x: 1 if str(x).strip().lower() == "on" else 0
-        )
-
-    if "Quiet_Mode" in df_resampled.columns:
-        df_resampled["Quiet_Mode"] = df_resampled["Quiet_Mode"].apply(
-            lambda x: 1 if str(x).strip().lower() == "on" else 0
-        )
-
-    # DHW_Mode normalisation (Economic/Standard/Power)
-    if "DHW_Mode" in df_resampled.columns:
-        def _norm_dhw_mode(val: Any) -> Optional[str]:
-            if pd.isna(val):
-                return np.nan
-            s = str(val).strip().lower()
-            if s in ("economic", "eco"):
-                return "Economic"
-            if s in ("standard", "std"):
-                return "Standard"
-            if s in ("power", "boost", "forced"):
-                return "Power"
-            return np.nan
-
-        df_resampled["DHW_Mode"] = df_resampled["DHW_Mode"].apply(_norm_dhw_mode)
-
-    # Convert everything except clearly non-numeric columns to numeric
-    non_numeric = {"ValveMode", "DHW_Mode"}
-    for col in df_resampled.columns:
-        if col in non_numeric:
-            continue
-        df_resampled[col] = pd.to_numeric(df_resampled[col], errors="coerce")
-
-    if progress_cb:
-        progress_cb("HA data loaded", 60)
-
-    return df_resampled
-
-
-def process_ha_files(
-    uploaded_files: Iterable[Any],
-) -> Optional[Dict[str, Any]]:
-    """
-    High-level helper to:
-      1. Load HA CSV(s) → df_ha (wide, 1-min, friendly names),
-      2. Run apply_gatekeepers (physics + DHW/heating flags),
-      3. Detect runs (including DHW runs),
-      4. Compute daily stats (heat, electricity, COP, DHW_SCOP, etc.).
-
-    Returns a dict like:
-      {
-        "df":     minute-level dataframe (after gatekeepers),
-        "runs":   list of per-run dicts (including DHW runs),
-        "daily":  daily aggregation (heat, COP, DHW_SCOP, etc.)
-      }
-    or None if nothing usable was found.
-    """
-    # Simple progress bar integration mirroring data_loader
-    pbar = st.progress(0, text="Loading Home Assistant data…")
-
-    def _update(text: str, pct: int) -> None:
-        pbar.progress(pct, text=text)
-
-    df_ha = load_ha_dataframe(uploaded_files, progress_cb=_update)
-    if df_ha is None or df_ha.empty:
-        pbar.empty()
+    # ------------------------------------------------------------------
+    # 2. VERIFY REQUIRED COLUMNS
+    # ------------------------------------------------------------------
+    # HA files usually have: entity_id, state, last_changed
+    time_cols = [c for c in ("last_changed", "last_updated", "time") if c in long.columns]
+    if "entity_id" not in long.columns or "state" not in long.columns or not time_cols:
         return None
 
-    _update("Applying physics gatekeepers…", 75)
-    df = apply_gatekeepers(df_ha)
+    ts_col = time_cols[0]
+    long[ts_col] = pd.to_datetime(long[ts_col], errors="coerce")
+    long = long.dropna(subset=[ts_col])
 
-    _update("Detecting runs (Heating vs DHW)…", 85)
-    runs_list = detect_runs(df)
+    # ------------------------------------------------------------------
+    # 3. INFER DTYPES PER ENTITY
+    # ------------------------------------------------------------------
+    dtype_map: Dict[str, str] = {}
+    for eid, grp in long.groupby("entity_id"):
+        dtype_map[eid] = _infer_dtype(grp["state"])
 
-    _update("Computing daily statistics (Heat & COP)…", 100)
-    daily_df = get_daily_stats(df)
+    # ------------------------------------------------------------------
+    # 4. CONVERT VALUES
+    # ------------------------------------------------------------------
+    long["value"] = [
+        _convert_value(v, dtype_map.get(eid, "string"))
+        for v, eid in zip(long["state"], long["entity_id"])
+    ]
 
-    pbar.empty()
+    # ------------------------------------------------------------------
+    # 5. GROUP DUPLICATES → ONE VALUE PER (timestamp, entity_id)
+    # ------------------------------------------------------------------
+    def _agg_group(series):
+        """Mean for numeric/binary, last valid for strings."""
+        if series.dtype == object:
+            return series.ffill().iloc[-1]
+        else:
+            return pd.to_numeric(series, errors="coerce").mean()
 
+    grouped = (
+        long.groupby([ts_col, "entity_id"])["value"]
+        .apply(_agg_group)
+        .reset_index()
+    )
+
+    # ------------------------------------------------------------------
+    # 6. PIVOT TO WIDE
+    # ------------------------------------------------------------------
+    wide = grouped.pivot(index=ts_col, columns="entity_id", values="value")
+    wide.index = pd.to_datetime(wide.index)
+
+    # ------------------------------------------------------------------
+    # 7. RESAMPLE TO 1-MINUTE
+    # ------------------------------------------------------------------
+    df_wide = wide.resample("1T").ffill()
+
+    # ------------------------------------------------------------------
+    # 8. APPLY USER SENSOR MAPPING
+    # ------------------------------------------------------------------
+    # user_config["mapping"] maps THERM keys → entity_id strings
+    mapping = user_config.get("mapping", {})
+
+    # Reverse: entity_id → THERM key
+    rename_dict = {}
+    for therm_key, entity_id in mapping.items():
+        if entity_id in df_wide.columns:
+            rename_dict[entity_id] = therm_key
+
+    df = df_wide.rename(columns=rename_dict)
+
+    # ------------------------------------------------------------------
+    # 9. COMPUTE DeltaT IF MAPPED
+    # ------------------------------------------------------------------
+    if "FlowTemp" in df.columns and "ReturnTemp" in df.columns:
+        df["DeltaT"] = df["FlowTemp"] - df["ReturnTemp"]
+
+    # Ensure numeric types for engine
+    numeric_cols = ["Power", "FlowTemp", "ReturnTemp", "FlowRate", "Freq", "DeltaT"]
+    for c in numeric_cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # ------------------------------------------------------------------
+    # 10. RUN PHYSICS ENGINE
+    # ------------------------------------------------------------------
+    df_engine = processing.apply_gatekeepers(df, user_config)
+    if df_engine is None or df_engine.empty:
+        return None
+
+    # ------------------------------------------------------------------
+    # 11. RUN DETECTOR + DAILY STATS
+    # ------------------------------------------------------------------
+    runs = processing.detect_runs(df_engine, user_config)
+    daily = processing.get_daily_stats(df_engine)
+
+    # ------------------------------------------------------------------
+    # 12. OUTPUT STRUCTURE (same as Grafana loader)
+    # ------------------------------------------------------------------
     return {
-        "df": df,
-        "runs": runs_list,
-        "daily": daily_df,
+        "df": df_engine,
+        "raw_history": df,   # pre-physics wide dataframe
+        "runs": runs,
+        "daily": daily,
+        "patterns": None,
+        "baselines": None,
     }
