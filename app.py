@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empt
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*invalid value encountered.*")
 pd.set_option("future.no_silent_downcasting", True)
 
-st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="HP")
+st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="assets/therm_logo_browser_tab.png")
 
 # === SIDEBAR ===
 st.sidebar.image("assets/therm_logo.png", width="stretch")
