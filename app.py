@@ -21,13 +21,41 @@ pd.set_option("future.no_silent_downcasting", True)
 
 st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="assets/therm_logo_browser_tab.png")
 
-# === SIDEBAR ===
+# Decide whether we're in System Setup (no processed config yet)
+in_system_setup = "system_config" not in st.session_state
+
+# === SIDEBAR HEADER ===
 st.sidebar.image("assets/therm_logo.png", width="stretch")
 st.sidebar.markdown("**Thermal Health & Efficiency Reporting Module v2 beta**")
 
-# === FILE UPLOADER ===
-uploaded_files = st.sidebar.file_uploader("Upload CSV(s)", accept_multiple_files=True, type="csv")
-show_inspector = st.sidebar.checkbox("Show File Inspector", value=False)
+# === DATA SOURCE / FILE UPLOADER (DECLUTTERED) ===
+# Expanded in System Setup, collapsed once a profile is configured & data processed
+with st.sidebar.expander("Data source & files", expanded=in_system_setup):
+    # Keep a stable key so Streamlit remembers the upload
+    uploaded_files = st.file_uploader(
+        "Upload CSV(s)",
+        accept_multiple_files=True,
+        type="csv",
+        key="csv_uploader",
+    )
+    show_inspector = st.checkbox("Show File Inspector", value=False)
+
+    # Persist the filenames so we can show them even after processing
+    if uploaded_files:
+        st.session_state["uploaded_filenames"] = [f.name for f in uploaded_files]
+
+    if "uploaded_filenames" in st.session_state:
+        st.markdown("**Loaded files:**")
+        for name in st.session_state["uploaded_filenames"]:
+            st.markdown(f"- `{name}`")
+
+        # Optional: allow the user to hard-reset everything
+        if st.button("Clear files and start again", type="secondary"):
+            for key in ["system_config", "cached", "uploaded_filenames", "capabilities"]:
+                st.session_state.pop(key, None)
+            st.rerun()
+
+
 
 
 # === MANUAL CACHING LOGIC ===
