@@ -190,19 +190,37 @@ def get_processed_data(files, user_config):
 if uploaded_files:
     if show_inspector:
         st.title("Pre-Flight Inspector")
-        summary, details = inspector.inspect_raw_files(uploaded_files)
-        st.dataframe(summary, width="stretch")
-        for f, d in details.items():
-            with st.expander(f"Details: {f}"):
-                entities = d.get("entities_found", [])
-                st.write(f"Entities found: {len(entities)}")
-                st.code("\n".join(entities))
 
-                # NEW: per-entity type / example info from inspector.py
-                entity_debug = d.get("entity_debug", [])
-                if entity_debug:
-                    st.markdown("**Entity type / example summary:**")
-                    st.code("\n".join(entity_debug))
+        summary, details_all = inspector.inspect_raw_files(uploaded_files)
+        st.dataframe(summary, width="stretch")
+
+        file_details = details_all.get("file_details", {})
+        sensor_debug = details_all.get("sensor_debug", {})
+
+        # ---- FILE-LEVEL DETAILS ----
+        for fname, info in file_details.items():
+            with st.expander(f"File Details: {fname}", expanded=False):
+                entities = info.get("entities_found", [])
+                st.write(f"Entities found: {len(entities)}")
+                if entities:
+                    st.code("\n".join(entities))
+
+                # Optional: show raw column list
+                cols = info.get("columns_raw", [])
+                if cols:
+                    st.markdown("**Columns:**")
+                    st.code("\n".join(cols))
+
+        # ---- SENSOR-LEVEL DEBUG ----
+        for fname, sensors in sensor_debug.items():
+            with st.expander(f"Sensor Debug: {fname}", expanded=False):
+                if "error" in sensors:
+                    st.error(sensors["error"])
+                    continue
+
+                st.write(f"Sensors detected: {len(sensors)}")
+                st.json(sensors)
+
     else:
         # --- CONFIGURATION WORKFLOW ---
         if "system_config" not in st.session_state:
