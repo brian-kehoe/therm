@@ -283,6 +283,8 @@ def render_configuration_interface(uploaded_files):
                 st.error("Missing required sensors.")
                 return None
             else:
+                # Flag the main app to scroll to top on the next render
+                st.session_state["scroll_to_top"] = True
                 return config_object
 
     return None

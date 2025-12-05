@@ -19,25 +19,46 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empt
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*invalid value encountered.*")
 pd.set_option("future.no_silent_downcasting", True)
 
+# --- UI helpers ---------------------------------------------------------------
+def _scroll_to_top_if_requested() -> None:
+    """
+    If a previous step requested a scroll-to-top (e.g. after 'Process Uploaded Data'),
+    inject a small JS snippet once and then clear the flag.
+    """
+    if st.session_state.get("scroll_to_top"):
+        st.markdown(
+            "<script>window.scrollTo(0, 0);</script>",
+            unsafe_allow_html=True,
+        )
+        st.session_state["scroll_to_top"] = False
+# --- end scroll helper --------------------------------------------------------
+
 st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="assets/therm_logo_browser_tab.png")
 
 # Decide whether we're in System Setup (no processed config yet)
 in_system_setup = "system_config" not in st.session_state
 
+# Apply any one-shot scroll request
+_scroll_to_top_if_requested()
+
+# Versioned key to allow hard-reset of the file uploader widget
+if "csv_uploader_version" not in st.session_state:
+    st.session_state["csv_uploader_version"] = 0
+
+
 # === SIDEBAR HEADER ===
 st.sidebar.image("assets/therm_logo.png", width="stretch")
 st.sidebar.markdown("**Thermal Health & Efficiency Reporting Module v2 beta**")
 
-# === DATA SOURCE / FILE UPLOADER (DECLUTTERED) ===
-# Expanded in System Setup, collapsed once a profile is configured & data processed
 with st.sidebar.expander("Data source & files", expanded=in_system_setup):
-    # Keep a stable key so Streamlit remembers the upload
+    # Use a versioned key so we can hard-reset the uploader
     uploaded_files = st.file_uploader(
         "Upload CSV(s)",
         accept_multiple_files=True,
         type="csv",
-        key="csv_uploader",
+        key=f"csv_uploader_{st.session_state['csv_uploader_version']}",
     )
+
     show_inspector = st.checkbox("Show File Inspector", value=False)
 
     # Persist the filenames so we can show them even after processing
@@ -51,10 +72,18 @@ with st.sidebar.expander("Data source & files", expanded=in_system_setup):
 
         # Optional: allow the user to hard-reset everything
         if st.button("Clear files and start again", type="secondary"):
-            for key in ["system_config", "cached", "uploaded_filenames", "capabilities"]:
+            for key in [
+                "system_config",
+                "cached",
+                "uploaded_filenames",
+                "capabilities",
+            ]:
                 st.session_state.pop(key, None)
-            st.rerun()
 
+            # Force the file_uploader to re-mount with a fresh key
+            st.session_state["csv_uploader_version"] += 1
+
+            st.rerun()
 
 
 
@@ -197,8 +226,10 @@ if uploaded_files:
                     st.session_state.pop("capabilities", None)
                     st.rerun()
 
-                # Keep profile download in the sidebar
-                mapping_ui.render_config_download(st.session_state["system_config"])
+                # NOTE:
+                # In Analysis Mode screens we intentionally do NOT show
+                # the "Download Profile" button. Profile download remains
+                # available as part of the System Setup / mapping UI.
 
                 # --- Data Debugger at the bottom ---
                 with st.expander("Data Debugger", expanded=False):
@@ -209,10 +240,6 @@ if uploaded_files:
                     if data and data.get("runs"):
                         st.write(f"Detected {len(data['runs'])} runs")
                         st.write(f"Run 0 Type: {data['runs'][0]['run_type']}")
-
-
-
-
 
 
             # 3. Render Dashboard (main panel)
