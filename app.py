@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import traceback  # NEW: for detailed debug
+import json  # NEW: for app debug bundle export
 
 import view_trends
 import view_runs
@@ -171,6 +172,9 @@ def get_processed_data(files, user_config):
         return None
 
     dataset_source = sources.pop() if sources else "grafana"
+    # Store for downstream debug bundle
+    st.session_state["dataset_source"] = dataset_source
+
 
     # ------------------------------------------------------------------
     # 2. Manual cache key (include dataset_source so HA vs Grafana
@@ -292,10 +296,13 @@ def get_processed_data(files, user_config):
 if uploaded_files:
     if show_inspector:
         st.title("Pre-Flight Inspector")
-
         summary, details_all = inspector.inspect_raw_files(uploaded_files)
-        st.dataframe(summary, width="stretch")
 
+        # Store inspector outputs for downstream debug bundle (optional, AI-facing)
+        st.session_state["inspector_summary"] = summary
+        st.session_state["inspector_details"] = details_all
+
+        st.dataframe(summary, width="stretch")
         file_details = details_all.get("file_details", {})
         sensor_debug = details_all.get("sensor_debug", {})
 
@@ -502,10 +509,60 @@ if uploaded_files:
                                     st.warning("No active periods found (Power > 500W)")
                             # === END NEW DIAGNOSTIC SECTION ===
 
-                    # Runs summary (also guarded)
-                    if data is not None and data.get("runs"):
-                        st.write(f"Detected {len(data['runs'])} runs")
-                        st.write(f"Run 0 Type: {data['runs'][0]['run_type']}")
+                        # Runs summary (also guarded)
+                        runs_list = data.get("runs") or []
+                        if runs_list:
+                            st.write(f"Detected {len(runs_list)} runs")
+                            st.write(f"Run 0 Type: {runs_list[0].get('run_type')}")
+
+                        # --- NEW: App Debug Bundle (JSON) ---
+                        try:
+                            # Canonical global stats for the debug bundle
+                            global_stats = processing.compute_global_stats(df_dbg)
+
+                            # Mapping summary (logical role -> entity_id)
+                            mapping_obj = {}
+                            if isinstance(config, dict):
+                                mapping_obj = config.get("mapping") or {}
+
+                            # Inspector outputs, if inspector has been run this session
+                            inspector_summary = st.session_state.get("inspector_summary")
+                            inspector_details = st.session_state.get("inspector_details")
+
+                            # Active stats may or may not exist depending on raw_history/path taken
+                            active_stats_safe = locals().get("active_stats", {})
+
+                            debug_bundle = {
+                                "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+                                "app_version": "public-beta-v2.8",
+                                "dataset_source": st.session_state.get("dataset_source", "unknown"),
+                                "config": config,
+                                "mapping": mapping_obj,
+                                "global_stats": global_stats,
+                                "runs": runs_list,
+                                "sensor_coverage": coverage,
+                                "active_sample_stats": active_stats_safe,
+                                "capabilities": st.session_state.get("capabilities", {}),
+                                "inspector_summary": (
+                                    inspector_summary.to_dict(orient="list")
+                                    if hasattr(inspector_summary, "to_dict")
+                                    else inspector_summary
+                                ),
+                                "inspector_details": inspector_details,
+                            }
+
+                            debug_json_bytes = json.dumps(debug_bundle, default=str).encode("utf-8")
+                            st.download_button(
+                                "⬇ Download app debug bundle (JSON)",
+                                data=debug_json_bytes,
+                                file_name=f"Data Debugger DEBUG {ts}_bundle.json",
+                                mime="application/json",
+                                key="download_debug_bundle_json",
+                            )
+                        except Exception:
+                            # Fail silently – debug bundle must never break the main UI
+                            pass
+
 
 
 
