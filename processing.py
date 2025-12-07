@@ -382,17 +382,15 @@ def get_rate_for_timestamp(ts, tariff_structure, default_rate: float = 0.35) -> 
 
 
 # --- MAIN GATEKEEPER / ENGINE ------------------------------------------------
-
-
 def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.DataFrame:
     """
     Core "engine" that:
-        - Normalises physics fields (DeltaT)
-        - Classifies activity + DHW/Heating
-        - Ensures Heat + splits + COP
-        - Derives Zone configuration strings
-        - Infers Immersion activity/power
-        - Applies tariff to build incremental cost
+    - Normalises physics fields (DeltaT)
+    - Classifies activity + DHW/Heating
+    - Ensures Heat + splits + COP
+    - Derives Zone configuration strings
+    - Infers Immersion activity/power
+    - Applies tariff to build incremental cost
     """
     d = df.copy()
     thresholds = PHYSICS_THRESHOLDS if isinstance(PHYSICS_THRESHOLDS, dict) else {}
@@ -405,33 +403,72 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
     power_min = thresholds.get("power_min", 50)
     d["is_active"] = (d["Power"] > power_min).astype(int)
 
+    # 3. Detect DHW Mode (Valve-first, Status-second, DHW_Mode not used for detection)
+    idx = d.index
+    is_dhw_mask = pd.Series(False, index=idx)
 
-    # 3. Detect DHW Mode
-    is_dhw_mask = pd.Series(False, index=d.index)
+    # --- Valve evidence (primary) -------------------------------------------
+    valve_dhw_mask = pd.Series(False, index=idx)
+    valve_heating_mask = pd.Series(False, index=idx)
 
-    if "DHW_Active" in d.columns:
-        is_dhw_mask |= d["DHW_Active"] > 0
+    if "Valve_Is_DHW" in d.columns:
+        v = pd.to_numeric(d["Valve_Is_DHW"], errors="coerce").fillna(0)
+        valve_dhw_mask |= v > 0.5
 
-    if "DHW_Mode" in d.columns:
-        if pd.api.types.is_numeric_dtype(d["DHW_Mode"]):
-            is_dhw_mask |= d["DHW_Mode"] > 0
-        else:
-            is_dhw_mask |= (
-                d["DHW_Mode"]
-                .astype(str)
-                .str.lower()
-                .str.contains("on|active|hot|dhw", na=False)
-            )
+    if "Valve_Is_Heating" in d.columns:
+        vh = pd.to_numeric(d["Valve_Is_Heating"], errors="coerce").fillna(0)
+        valve_heating_mask |= vh > 0.5
 
     if "ValveMode" in d.columns:
-        is_dhw_mask |= (
-            d["ValveMode"]
-            .astype(str)
-            .str.lower()
-            .str.contains("hot|dhw", na=False)
-        )
+        valve_str = d["ValveMode"].astype(str).str.lower()
+        # DHW / hot water circuit
+        valve_dhw_mask |= valve_str.str.contains("dhw|hot water|hot_water", regex=True)
+        # Explicit heating circuit label
+        valve_heating_mask |= valve_str.str.contains("heat", regex=False)
 
-    d["is_DHW"] = is_dhw_mask
+    has_valve_info = valve_dhw_mask.any() or valve_heating_mask.any() or (
+        ("Valve_Is_DHW" in d.columns) or ("ValveMode" in d.columns)
+    )
+
+    # --- Status evidence (secondary) ----------------------------------------
+    dhw_status_mask = pd.Series(False, index=idx)
+
+    if "DHW_Status_Is_On" in d.columns:
+        s = pd.to_numeric(d["DHW_Status_Is_On"], errors="coerce").fillna(0)
+        dhw_status_mask |= s > 0.5
+
+    if "DHW_Active" in d.columns:
+        s = pd.to_numeric(d["DHW_Active"], errors="coerce").fillna(0)
+        dhw_status_mask |= s > 0
+
+    if "DHW_Status" in d.columns:
+        status_str = d["DHW_Status"].astype(str).str.lower()
+        dhw_status_mask |= status_str.str.contains("on|active", regex=True)
+
+    has_status_info = dhw_status_mask.any()
+
+    # NOTE: DHW_Mode is intentionally *not* used here for DHW detection.
+    # It is a control "aggressiveness" setting (Eco / Standard / Power / Force),
+    # not a reliable indicator that a DHW run is actually in progress.
+
+    # --- Combine valve + status into is_DHW ---------------------------------
+    if has_valve_info:
+        # Valve defines the circuit:
+        # - If valve says Heating → not DHW regardless of status.
+        # - If valve says DHW → DHW only when status is "On" (if we have it),
+        #   otherwise fall back to valve alone.
+        if has_status_info:
+            is_dhw_mask = valve_dhw_mask & dhw_status_mask
+        else:
+            is_dhw_mask = valve_dhw_mask
+    else:
+        # No valve info; fall back to status alone if present.
+        if has_status_info:
+            is_dhw_mask = dhw_status_mask
+        else:
+            is_dhw_mask = pd.Series(False, index=idx)
+
+    d["is_DHW"] = is_dhw_mask.astype(bool)
     d["is_heating"] = (d["is_active"] == 1) & (~d["is_DHW"])
 
     _debug_engine_state(d, "after activity flags")
@@ -439,7 +476,6 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
     # 4. HEAT + SPLITS + COP (single canonical implementation)
     d = _ensure_heat_and_cop(d, thresholds)
     _debug_engine_state(d, "after heat/COP")
-
 
     # 5. Zone Config Strings
     zone_cols = get_active_zone_columns(d)
@@ -454,8 +490,7 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
                     .str.lower()
                     .replace({"on": 1, "off": 0, "true": 1, "false": 0})
                 )
-                d[z] = pd.to_numeric(d[z], errors="coerce").fillna(0)
-
+            d[z] = pd.to_numeric(d[z], errors="coerce").fillna(0)
 
         d["Active_Zones_Count"] = d[zone_cols].sum(axis=1)
         z_map = {z: get_friendly_name(z, user_config) for z in zone_cols}
@@ -489,6 +524,7 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
 
     # 7. Cost (Tariff-aware)
     d["hour"] = d.index.hour
+
     # Retain legacy "is_night_rate" for any downstream logic/visuals
     d["is_night_rate"] = d["hour"].isin(NIGHT_HOURS)
 
@@ -502,17 +538,18 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
         else:
             rate_day = 0.35
             rate_night = 0.15
+
         d["Current_Rate"] = np.where(d["is_night_rate"], rate_night, rate_day)
 
     d["Cost_Inc"] = (d["Power"] / 1000.0 / 60.0) * d["Current_Rate"]
 
     # Final engine debug snapshot
     _debug_engine_state(d, "final engine df")
-
     # Removed automatic CSV write to disk.
     # Manual downloads via the Streamlit Data Debugger expander are now the intended method.
 
     return d
+
 
 # --- GLOBAL STATS (CANONICAL) -----------------------------------------------
 def compute_global_stats(df: pd.DataFrame) -> dict:
@@ -563,8 +600,6 @@ def compute_global_stats(df: pd.DataFrame) -> dict:
 
 
 # --- RUN DETECTION -----------------------------------------------------------
-
-
 def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]:
     """
     Group contiguous active periods into "runs" and derive per-run metrics
@@ -594,19 +629,46 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
         if len(group) < 5:
             continue
 
-        run_type = "DHW" if group["is_DHW"].any() else "Heating"
+        # Majority-based DHW classification instead of "any is_DHW"
+        is_dhw_series = group.get("is_DHW", pd.Series(False, index=group.index)).astype(bool)
+        p_dhw = float(is_dhw_series.mean()) if len(group) > 0 else 0.0
+
+        # Extra context from valve/status if present
+        p_valve_dhw = 0.0
+        if "Valve_Is_DHW" in group.columns:
+            v = pd.to_numeric(group["Valve_Is_DHW"], errors="coerce").fillna(0)
+            p_valve_dhw = float((v > 0.5).mean())
+        elif "ValveMode" in group.columns:
+            vs = group["ValveMode"].astype(str).str.lower()
+            p_valve_dhw = float(vs.str.contains("dhw|hot water|hot_water", regex=True).mean())
+
+        p_status_on = 0.0
+        if "DHW_Status_Is_On" in group.columns:
+            s = pd.to_numeric(group["DHW_Status_Is_On"], errors="coerce").fillna(0)
+            p_status_on = float((s > 0.5).mean())
+        elif "DHW_Active" in group.columns:
+            s = pd.to_numeric(group["DHW_Active"], errors="coerce").fillna(0)
+            p_status_on = float((s > 0).mean())
+        elif "DHW_Status" in group.columns:
+            ss = group["DHW_Status"].astype(str).str.lower()
+            p_status_on = float(ss.str.contains("on|active", regex=True).mean())
+
+        run_type = "Heating"
+        # Primary rule: majority of minutes flagged as DHW by engine flags
+        if p_dhw >= 0.6:
+            run_type = "DHW"
+        else:
+            # Secondary rule: strong valve+status evidence even if is_DHW is sparse
+            if (p_valve_dhw >= 0.6) and (p_status_on >= 0.6):
+                run_type = "DHW"
 
         # Averages
         avg_outdoor = (
-            group["OutdoorTemp"].mean()
-            if "OutdoorTemp" in group.columns
-            else 0
+            group["OutdoorTemp"].mean() if "OutdoorTemp" in group.columns else 0
         )
         avg_flow = group["FlowTemp"].mean() if "FlowTemp" in group.columns else 0
         avg_flow_rate = (
-            group["FlowRate"].mean()
-            if "FlowRate" in group.columns
-            else 0
+            group["FlowRate"].mean() if "FlowRate" in group.columns else 0
         )
 
         # Metrics
@@ -635,7 +697,7 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
         if run_type == "Heating" and rooms_per_zone and active_zones_list:
             for z in active_zones_list:
                 relevant_rooms.extend(rooms_per_zone.get(z, []))
-            relevant_rooms = list(set(relevant_rooms))
+        relevant_rooms = list(set(relevant_rooms))
 
         # Room Deltas
         room_deltas: dict[str, float] = {}
@@ -671,6 +733,7 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
         )
 
     return runs
+
 
 
 # --- DAILY STATS -------------------------------------------------------------
