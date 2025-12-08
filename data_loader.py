@@ -136,12 +136,10 @@ def apply_modbus_interpretation(
 # ----------------------------------------------------------------------
 
 def _coerce_numeric_sensors(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Coerce sensor-like columns to numeric while preserving explicit text modes.
-
+    """ Coerce sensor-like columns to numeric while preserving explicit text modes.
     Mirrors the main-branch invariant:
-        - FlowRate, Power, temperatures, etc. should be numeric.
-        - Only a small, explicit set of mode/label columns stay as text.
+    - FlowRate, Power, temperatures, etc. should be numeric.
+    - Only a small, explicit set of mode/label columns stay as text.
     """
     # Extend this set as you add more textual mode/label columns.
     text_cols = {
@@ -152,18 +150,64 @@ def _coerce_numeric_sensors(df: pd.DataFrame) -> pd.DataFrame:
         # "DHW_Mode_Label",
     }
 
+    # Tokens we consider as binary-like states (lowercased & stripped)
+    binary_token_map = {
+        "on": 1,
+        "off": 0,
+        "true": 1,
+        "false": 0,
+        "running": 1,
+        "not running": 0,
+        "yes": 1,
+        "no": 0,
+        "open": 1,
+        "closed": 0,
+        "1": 1,
+        "0": 0,
+    }
+
     for col in df.columns:
         if col in text_cols:
             # Explicitly textual columns stay as-is
             continue
+
+        series = df[col]
+
+        # If it's already numeric, leave it alone
+        if pd.api.types.is_numeric_dtype(series):
+            continue
+
+        # Try to detect binary-like columns (on/off, 0/1, running/not running, etc.)
+        non_null = series.dropna()
+        if not non_null.empty:
+            norm = (
+                non_null.astype(str)
+                .str.strip()
+                .str.lower()
+            )
+            unique_vals = set(norm.unique())
+
+            # Only treat as binary if small cardinality and all values are in our token map
+            if 0 < len(unique_vals) <= 6 and unique_vals.issubset(binary_token_map.keys()):
+                df[col] = (
+                    series.astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .map(binary_token_map)
+                    .astype("float64")
+                )
+                continue
+
+        # Fallback: numeric coercion as before
         try:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = pd.to_numeric(series, errors="coerce")
         except Exception:
             # If conversion fails for some weird column, leave it as-is.
             # Downstream code should ignore non-numeric channels.
             pass
 
     return df
+
 
 
 # ----------------------------------------------------------------------

@@ -226,17 +226,25 @@ def _ensure_heat_and_cop(
         d["Power"] = pd.to_numeric(d["Power"], errors="coerce").fillna(0)
         d["Power"] = d["Power"].abs()
 
-    # --- Power & Heat Splits + COP ---
+    # ------------------------------------------------------------------
+    # Heat_Clean: Non-negative heat for display and COP calculations
+    # Raw Heat column preserved for defrost/diagnostic analysis.
+    # Negative heat can occur legitimately during reverse-cycle defrost
+    # (heat extracted from building to melt ice on outdoor coil).
+    # ------------------------------------------------------------------
+    d["Heat_Clean"] = d["Heat"].clip(lower=0)
+
+# --- Power & Heat Splits + COP ---
     is_heating = d.get("is_heating", 0).astype(bool)
     is_dhw = d.get("is_DHW", 0).astype(bool)
 
     d["Power_Heating"] = np.where(is_heating, d["Power"], 0)
     d["Power_DHW"] = np.where(is_dhw, d["Power"], 0)
 
-    d["Heat_Heating"] = np.where(is_heating, d["Heat"], 0)
-    d["Heat_DHW"] = np.where(is_dhw, d["Heat"], 0)
+    d["Heat_Heating"] = np.where(is_heating, d["Heat_Clean"], 0)
+    d["Heat_DHW"] = np.where(is_dhw, d["Heat_Clean"], 0)
 
-    d["COP_Real"] = safe_div(d["Heat"], d["Power"])
+    d["COP_Real"] = safe_div(d["Heat_Clean"], d["Power"])
     d["COP_Graph"] = d["COP_Real"].clip(lower=0, upper=10)
 
     return d
