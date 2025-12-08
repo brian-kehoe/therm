@@ -138,7 +138,66 @@ def _source_module_urls(commit: str | None) -> Dict[str, str]:
 
 
 # -------------------------------
-# ✅ UI SANITY BUILDERS
+# ✅ UI LABEL EXTRACTION (ALL MODES)
+# -------------------------------
+
+def _extract_ui_labels_all_modes(
+    df: pd.DataFrame,
+    daily_df: pd.DataFrame | None,
+    runs: List[Dict[str, Any]],
+    profile: Dict[str, Any],
+) -> Dict[str, Any]:
+
+    # -------- Long-Term Trends --------
+    long_term_trends = daily_df.columns.tolist() if daily_df is not None else []
+
+    # -------- Run Inspector: Select Run Dropdown --------
+    select_run_dropdown = []
+    for r in runs:
+        label = f"{r.get('run_type')} | {r.get('start')} → {r.get('end')}"
+        select_run_dropdown.append(label)
+
+    # -------- Run Inspector: Core Metrics (legend & tooltips) --------
+    core_metrics = [
+        c for c in df.columns
+        if any(k in c for k in ["Power", "Heat", "COP", "Cost", "Rate"])
+    ]
+
+    # -------- Run Inspector: Hydraulics --------
+    HYDRAULICS_KEYS = {
+        "FlowTemp", "ReturnTemp", "DeltaT",
+        "FlowRate", "Power", "Power_Clean",
+        "Freq", "ValveMode", "DHW_Mode", "Defrost"
+    }
+    hydraulics = [c for c in df.columns if c in HYDRAULICS_KEYS]
+
+    # -------- Run Inspector: Rooms & Zones --------
+    rooms = []
+    zones = []
+    for k in profile.get("mapping", {}):
+        if k.startswith("Room_"):
+            rooms.append(_get_friendly_name(k, profile))
+        if k.startswith("Zone_"):
+            zones.append(_get_friendly_name(k, profile))
+
+    # -------- Data Quality Audit --------
+    data_quality_audit = sorted(df.columns)
+
+    return {
+        "long_term_trends": long_term_trends,
+        "run_inspector": {
+            "select_run_dropdown": select_run_dropdown,
+            "core_metrics": core_metrics,
+            "hydraulics": hydraulics,
+            "rooms": rooms,
+            "zones": zones,
+        },
+        "data_quality_audit": data_quality_audit,
+    }
+
+
+# -------------------------------
+# ✅ UI SANITY SUMMARY
 # -------------------------------
 
 def _summarise_runs(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -181,35 +240,28 @@ def _ui_sanity(
     profile: Dict[str, Any],
     daily_df: pd.DataFrame | None = None,
 ) -> Dict[str, Any]:
-    """
-    Summarise what the front end cares about:
-    - total heat (kWh) over the period
-    - overall COP (SCOP-like), in line with get_daily_stats + view_trends
-    """
+
     heat_kwh: float | None = None
     cop_mean: float | None = None
 
-    # 1) Prefer daily stats (matches front-end Trends behaviour)
+    # Prefer daily stats (matches front-end Trends)
     if daily_df is not None and not daily_df.empty:
-        # Try Total_Heat_kWh first
         if "Total_Heat_KWh" in daily_df.columns:
             heat_kwh = float(daily_df["Total_Heat_KWh"].sum())
         elif "Total_Heat_kWh" in daily_df.columns:
             heat_kwh = float(daily_df["Total_Heat_kWh"].sum())
         else:
-            # Fallback: sum heating + dhw if present
             heat_kwh = float(
                 daily_df.get("Heat_Heating_kWh", pd.Series(dtype=float)).sum()
                 + daily_df.get("Heat_DHW_kWh", pd.Series(dtype=float)).sum()
             )
 
-        # SCOP / overall COP
         if "Global_SCOP" in daily_df.columns:
             cop_series = pd.to_numeric(daily_df["Global_SCOP"], errors="coerce").dropna()
             if not cop_series.empty:
                 cop_mean = float(cop_series.mean())
 
-    # 2) Fallback: engine-level physics if daily stats missing or incomplete
+    # Fallback engine physics
     if heat_kwh is None and "Heat_Clean" in df.columns:
         heat_kwh = float(df["Heat_Clean"].fillna(0).sum() / 1000.0 / 60.0)
     elif heat_kwh is None and "Heat" in df.columns:
@@ -224,6 +276,13 @@ def _ui_sanity(
         if not cop_series.empty:
             cop_mean = float(cop_series.mean())
 
+    ui_labels = _extract_ui_labels_all_modes(
+        df=df,
+        daily_df=daily_df,
+        runs=runs,
+        profile=profile,
+    )
+
     return {
         "mode": mode,
         "rows": len(df),
@@ -231,11 +290,12 @@ def _ui_sanity(
         "cop_mean": cop_mean,
         "runs": _summarise_runs(runs),
         "mapping": _summarise_mapping(profile),
+        "ui_labels": ui_labels,
     }
 
 
 # -------------------------------
-# ✅ ✅ ✅ CORRECT HA PIPELINE ✅ ✅ ✅
+# ✅ HA PIPELINE
 # -------------------------------
 
 def run_ha(paths: SamplePaths) -> Tuple[Path, Path]:
@@ -249,7 +309,7 @@ def run_ha(paths: SamplePaths) -> Tuple[Path, Path]:
 
     df = res["df"]
     runs = res["runs"]
-    daily = res.get("daily")  # produced inside ha_loader via processing.get_daily_stats
+    daily = res.get("daily")
 
     ts = _utc_timestamp()
     git_meta = _git_metadata()
@@ -278,16 +338,13 @@ def run_ha(paths: SamplePaths) -> Tuple[Path, Path]:
     ui_payload["git"] = git_meta
     ui_payload["source_modules"] = source_urls
 
-    json_path.write_text(
-        json.dumps(ui_payload, indent=2),
-        encoding="utf-8",
-    )
+    json_path.write_text(json.dumps(ui_payload, indent=2), encoding="utf-8")
 
     return zip_path, json_path
 
 
 # -------------------------------
-# ✅ ✅ ✅ CORRECT GRAFANA PIPELINE ✅ ✅ ✅
+# ✅ GRAFANA PIPELINE
 # -------------------------------
 
 def run_grafana(paths: SamplePaths) -> Tuple[Path, Path]:
@@ -331,10 +388,7 @@ def run_grafana(paths: SamplePaths) -> Tuple[Path, Path]:
     ui_payload["git"] = git_meta
     ui_payload["source_modules"] = source_urls
 
-    json_path.write_text(
-        json.dumps(ui_payload, indent=2),
-        encoding="utf-8",
-    )
+    json_path.write_text(json.dumps(ui_payload, indent=2), encoding="utf-8")
 
     return zip_path, json_path
 
