@@ -1,6 +1,7 @@
-# view_runs.py
+# view_runs.py - Fixed zone and room naming
 
 import streamlit as st
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
@@ -12,9 +13,56 @@ from config import (
     AI_SYSTEM_CONTEXT,
     TARIFF_PROFILE_ID,
     CONFIG_HISTORY,
-    ZONE_TO_ROOM_MAP,
 )
 from utils import safe_div
+
+
+def _get_friendly_name(internal_key: str, user_config: dict) -> str:
+    """
+    Get the friendly display name for a zone or room.
+    
+    For Zone_1, Zone_2, etc. or Room_1, Room_2, etc.:
+    - Returns the mapped entity_id from user config
+    - Strips "binary_sensor." and "sensor." prefixes for cleaner display
+    - Falls back to the internal key if not mapped
+    
+    Args:
+        internal_key: Internal name like "Zone_1" or "Room_3"
+        user_config: User's system configuration dict
+        
+    Returns:
+        Friendly name string (cleaned entity_id or internal key)
+    """
+    if not isinstance(user_config, dict):
+        return str(internal_key)
+    
+    mapping = user_config.get("mapping", {})
+    if not isinstance(mapping, dict):
+        return str(internal_key)
+    
+    # Get the mapped entity_id
+    entity_id = str(mapping.get(internal_key, internal_key))
+    
+    # Strip common Home Assistant prefixes for cleaner display
+    if entity_id.startswith("binary_sensor."):
+        return entity_id.replace("binary_sensor.", "", 1)
+    elif entity_id.startswith("sensor."):
+        return entity_id.replace("sensor.", "", 1)
+    
+    return entity_id
+
+
+def _get_rooms_per_zone_config(user_config: dict) -> dict:
+    """
+    Get the user's rooms_per_zone configuration.
+    
+    Returns:
+        dict mapping zone keys (e.g., "Zone_1") to lists of room keys (e.g., ["Room_3"])
+    """
+    if not isinstance(user_config, dict):
+        return {}
+    
+    return user_config.get("rooms_per_zone", {})
 
 
 def render_run_inspector(df, runs_list):
@@ -29,17 +77,13 @@ def render_run_inspector(df, runs_list):
         AI Data (per-run JSON payload)
     """
     st.title(" Run Inspector")
+    
+    # Get user config from session state for friendly names
+    user_config = st.session_state.get("system_config", {})
 
     total_kwh_in = safe_div(df.get("Power_Clean", df["Power"]).sum(), 1000.0) / 60.0
     total_kwh_out = safe_div(df.get("Heat_Clean", df["Heat"]).sum(), 1000.0) / 60.0
     global_cop = safe_div(total_kwh_out, total_kwh_in)
-
-    # Sidebar global stats
-    st.sidebar.markdown("### Global Stats")
-    st.sidebar.metric("Runs Detected", len(runs_list) if runs_list else 0)
-    st.sidebar.metric("Total Heat Output", f"{total_kwh_out:.1f} kWh")
-    st.sidebar.metric("Total Electricity Input", f"{total_kwh_in:.1f} kWh")
-    st.sidebar.metric("Global COP", f"{global_cop:.2f}")
 
     if not runs_list:
         st.info("No runs detected.")
@@ -91,7 +135,7 @@ def render_run_inspector(df, runs_list):
 
     with nav_prev:
         if st.button(
-            "Previous", disabled=st.session_state["run_selector_idx"] <= 0
+            "← Previous", disabled=st.session_state["run_selector_idx"] <= 0
         ):
             st.session_state["run_selector_idx"] = max(
                 0, st.session_state["run_selector_idx"] - 1
@@ -99,7 +143,7 @@ def render_run_inspector(df, runs_list):
 
     with nav_next:
         if st.button(
-            "Next",
+            "Next →",
             disabled=st.session_state["run_selector_idx"] >= len(option_labels) - 1,
         ):
             st.session_state["run_selector_idx"] = min(
@@ -124,7 +168,6 @@ def render_run_inspector(df, runs_list):
     c3.metric("Avg ΔT", f"{selected_run['avg_dt']:.1f}°")
     avg_flow_lpm = selected_run.get("avg_flow_rate", 0)
     c4.metric("Avg Flow", f"{avg_flow_lpm:.1f} L/m")
-
 
     tight_layout = dict(margin=dict(l=10, r=10, t=30, b=10), height=350)
 
@@ -187,7 +230,7 @@ def render_run_inspector(df, runs_list):
             title="Power & Efficiency",
             hovermode="x unified",
         )
-        st.plotly_chart(fig, width="stretch", key="run_power_chart")
+        st.plotly_chart(fig, use_container_width=True, key="run_power_chart")
 
     # ------------------------------------------------------------------
     # TAB 2: Hydraulics (incl. Ghost Pumping)
@@ -267,43 +310,78 @@ def render_run_inspector(df, runs_list):
                 col=1,
             )
 
-        # Active Zones as thick bars
-        zone_map = {
-            "DHW_Active": "Hot Water",
-            "Zone_UFH": "Kitchen",
-            "Zone_DS": "Downstairs",
-            "Zone_US": "Upstairs",
-        }
-        zone_offsets = {
-            "DHW_Active": 0,
-            "Zone_UFH": 1,
-            "Zone_DS": 2,
-            "Zone_US": 3,
-        }
+        # ================================================================
+        #   FIXED: DYNAMIC ZONE LABELS WITH USER MAPPING
+        # ================================================================
+        # Exclude Zone_Config which is a string column for display
+        zone_cols = [
+            c for c in run_data.columns 
+            if c.startswith("Zone_") and c != "Zone_Config"
+        ]
+        has_dhw = "DHW_Active" in run_data.columns
 
-        for z_col, z_name in zone_map.items():
-            if z_col in run_data.columns:
-                base_y = zone_offsets[z_col]
-                y_vals = run_data[z_col].apply(
-                    lambda x: base_y + 0.8 if x > 0 else None
-                )
-                fig2.add_trace(
-                    go.Scatter(
-                        x=run_data.index,
-                        y=y_vals,
-                        name=z_name,
-                        mode="lines",
-                        line=dict(width=15),
-                        connectgaps=False,
-                    ),
-                    row=3,
-                    col=1,
-                )
+        # Build friendly zone labels from user mapping
+        zone_labels = {}
+        
+        # DHW label
+        if has_dhw:
+            zone_labels["DHW_Active"] = "Hot Water"
+        
+        # Zone labels from user mapping (e.g., "binary_sensor.underfloor_pump")
+        for z in zone_cols:
+            zone_labels[z] = _get_friendly_name(z, user_config)
 
+        # Order: DHW (if present) first, then sorted zones
+        ordered_keys = []
+        if has_dhw:
+            ordered_keys.append("DHW_Active")
+        ordered_keys.extend(sorted(zone_cols))
+
+        # Add thick zone bars
+        zone_offsets = {key: idx for idx, key in enumerate(ordered_keys)}
+
+        for key in ordered_keys:
+            if key not in run_data.columns:
+                continue
+            base_y = zone_offsets[key]
+            
+            # Convert zone values to numeric (handles HA string values like "on"/"off")
+            def _zone_active(val):
+                """Check if zone is active, handling both numeric and string values."""
+                if pd.isna(val):
+                    return None
+                if isinstance(val, str):
+                    v = val.strip().lower()
+                    is_active = v in ("on", "true", "1", "yes", "active")
+                    return base_y + 0.8 if is_active else None
+                try:
+                    is_active = float(val) > 0
+                    return base_y + 0.8 if is_active else None
+                except:
+                    return None
+            
+            y_vals = run_data[key].apply(_zone_active)
+            fig2.add_trace(
+                go.Scatter(
+                    x=run_data.index,
+                    y=y_vals,
+                    name=zone_labels[key],
+                    mode="lines",
+                    line=dict(width=15),
+                    connectgaps=False,
+                ),
+                row=3,
+                col=1,
+            )
+
+        # Y-axis labels for zones
+        y_tick_vals = [zone_offsets[key] + 0.4 for key in ordered_keys]
+        y_tick_labels = [zone_labels[key] for key in ordered_keys]
+        
         fig2.update_yaxes(
-            tickvals=[0.4, 1.4, 2.4, 3.4],
-            ticktext=["Hot Water", "Kitchen", "Downstairs", "Upstairs"],
-            range=[0, 4],
+            tickvals=y_tick_vals,
+            ticktext=y_tick_labels,
+            range=[0, len(ordered_keys)],
             row=3,
             col=1,
         )
@@ -338,7 +416,7 @@ def render_run_inspector(df, runs_list):
             height=chart_height,
             hovermode="x unified",
         )
-        st.plotly_chart(fig2, width="stretch", key="run_hydro_chart")
+        st.plotly_chart(fig2, use_container_width=True, key="run_hydro_chart")
 
     # ------------------------------------------------------------------
     # TAB 3: Rooms
@@ -347,34 +425,59 @@ def render_run_inspector(df, runs_list):
         if selected_run["run_type"] == "Heating":
             fig3 = go.Figure()
 
-            active_zones = [
-                z
-                for z in ["Zone_UFH", "Zone_DS", "Zone_US"]
-                if z in run_data.columns and run_data[z].sum() > 0
+            # Dynamically detect zones (exclude Zone_Config which is a string column)
+            detected_zones = [
+                z for z in run_data.columns 
+                if z.startswith("Zone_") and z != "Zone_Config"
             ]
 
+            # Which zones were active?
+            active_zones = [
+                z for z in detected_zones if run_data[z].sum() > 0
+            ]
+
+            # ================================================================
+            #   FIXED: USE USER'S rooms_per_zone CONFIGURATION
+            # ================================================================
+            rooms_per_zone = _get_rooms_per_zone_config(user_config)
+            
+            # Build allowed rooms from user's configuration
             allowed_rooms = set()
-            for z in active_zones:
-                allowed_rooms.update(ZONE_TO_ROOM_MAP.get(z, []))
+            
+            if rooms_per_zone:
+                # Use user's explicit zone → rooms mapping
+                for z in active_zones:
+                    rooms_in_zone = rooms_per_zone.get(z, [])
+                    allowed_rooms.update(rooms_in_zone)
+            
+            # If no explicit mapping or empty result, show all rooms
+            if not allowed_rooms:
+                allowed_rooms = set([
+                    c for c in run_data.columns if c.startswith("Room_")
+                ])
 
             room_cols = [
-                c
-                for c in run_data.columns
+                c for c in run_data.columns
                 if c.startswith("Room_") and c in allowed_rooms
             ]
 
             deltas = selected_run.get("room_deltas", {}) or {}
 
+            # ================================================================
+            #   FIXED: USE FRIENDLY ROOM NAMES FROM USER MAPPING
+            # ================================================================
             for col in room_cols:
-                clean_name = col.replace("Room_", "")
+                # Get friendly name from user mapping (e.g., entity_id)
+                friendly_name = _get_friendly_name(col, user_config)
+                
+                # Check if this room is relevant (has delta data)
                 is_relevant = col in deltas
+
                 fig3.add_trace(
                     go.Scatter(
                         x=run_data.index,
                         y=run_data[col],
-                        name=(
-                            f"* {clean_name}" if is_relevant else clean_name
-                        ),
+                        name=(f"* {friendly_name}" if is_relevant else friendly_name),
                         mode="lines+markers",
                         line=dict(width=3 if is_relevant else 1),
                         opacity=1.0 if is_relevant else 0.5,
@@ -403,7 +506,7 @@ def render_run_inspector(df, runs_list):
                 ),
                 height=350,
             )
-            st.plotly_chart(fig3, width="stretch", key="run_rooms_chart")
+            st.plotly_chart(fig3, use_container_width=True, key="run_rooms_chart")
         else:
             st.info("Room temperature analysis is skipped for DHW runs.")
 
