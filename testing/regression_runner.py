@@ -3,11 +3,12 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 import json
 import zipfile
 import pandas as pd
 from datetime import datetime, timezone
+import subprocess
 
 # -------------------------------
 # ✅ PRODUCTION MODULE IMPORTS
@@ -74,11 +75,66 @@ def _write_debug_bundle(zip_path: Path, df: pd.DataFrame, debug_json: Dict[str, 
 
 
 def _utc_timestamp() -> str:
-    """
-    Returns a filesystem-safe UTC timestamp like:
-    2025-12-08T13-42-10Z
-    """
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+
+
+def _git_metadata() -> Dict[str, Any]:
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+
+        dirty = subprocess.call(
+            ["git", "diff", "--quiet"],
+            stderr=subprocess.DEVNULL,
+        ) != 0
+
+        return {
+            "branch": branch,
+            "commit": commit,
+            "is_dirty": dirty,
+        }
+
+    except Exception:
+        return {
+            "branch": None,
+            "commit": None,
+            "is_dirty": None,
+        }
+
+
+def _source_module_urls(commit: str | None) -> Dict[str, str]:
+    if not commit:
+        return {}
+
+    base = f"https://raw.githubusercontent.com/brian-kehoe/THERM/{commit}/"
+
+    modules = [
+        "app.py",
+        "ha_loader.py",
+        "ha_engine.py",
+        "data_loader.py",
+        "data_normalizer.py",
+        "data_resolution.py",
+        "processing.py",
+        "baselines.py",
+        "schema_defs.py",
+        "config.py",
+        "config_manager.py",
+        "view_runs.py",
+        "view_quality.py",
+        "view_trends.py",
+        "mapping_ui.py",
+        "utils.py",
+    ]
+
+    return {m: base + m for m in modules}
 
 
 # -------------------------------
@@ -119,10 +175,6 @@ def _summarise_mapping(profile: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _ui_sanity(mode: str, df: pd.DataFrame, runs: List[Dict[str, Any]], profile: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Note: For HA, Heat_HA / COP_Graph_HA should exist.
-    For Grafana, these may be None (or you can extend later to use Grafana-specific columns).
-    """
     return {
         "mode": mode,
         "rows": len(df),
@@ -148,24 +200,22 @@ def run_ha(paths: SamplePaths) -> Tuple[Path, Path]:
 
     df = res["df"]
     runs = res["runs"]
-    daily = res.get("daily")
-    baselines = res.get("baselines")
-    patterns = res.get("patterns")
-    raw_history = res.get("raw_history")
+
+    ts = _utc_timestamp()
+    git_meta = _git_metadata()
+    source_urls = _source_module_urls(git_meta.get("commit"))
 
     debug_json = {
         "mode": "ha",
+        "generated_at_utc": ts,
+        "git": git_meta,
+        "source_modules": source_urls,
         "shape": df.shape,
         "columns": list(df.columns),
         "runs": _summarise_runs(runs),
-        "has_daily": daily is not None,
-        "has_baselines": baselines is not None,
-        "has_patterns": patterns is not None,
-        "has_raw_history": raw_history is not None,
     }
 
     _ensure_artifacts(paths.artifacts)
-    ts = _utc_timestamp()
 
     zip_path = paths.artifacts / f"ha_debug_bundle_{ts}.zip"
     json_path = paths.artifacts / f"ha_ui_sanity_{ts}.json"
@@ -174,6 +224,8 @@ def run_ha(paths: SamplePaths) -> Tuple[Path, Path]:
 
     ui_payload = _ui_sanity("ha", df, runs, profile)
     ui_payload["generated_at_utc"] = ts
+    ui_payload["git"] = git_meta
+    ui_payload["source_modules"] = source_urls
 
     json_path.write_text(
         json.dumps(ui_payload, indent=2),
@@ -200,15 +252,21 @@ def run_grafana(paths: SamplePaths) -> Tuple[Path, Path]:
     df = processing.apply_gatekeepers(df_raw, profile)
     runs = processing.detect_runs(df, profile)
 
+    ts = _utc_timestamp()
+    git_meta = _git_metadata()
+    source_urls = _source_module_urls(git_meta.get("commit"))
+
     debug_json = {
         "mode": "grafana",
+        "generated_at_utc": ts,
+        "git": git_meta,
+        "source_modules": source_urls,
         "shape": df.shape,
         "columns": list(df.columns),
         "runs": _summarise_runs(runs),
     }
 
     _ensure_artifacts(paths.artifacts)
-    ts = _utc_timestamp()
 
     zip_path = paths.artifacts / f"grafana_debug_bundle_{ts}.zip"
     json_path = paths.artifacts / f"grafana_ui_sanity_{ts}.json"
@@ -217,6 +275,8 @@ def run_grafana(paths: SamplePaths) -> Tuple[Path, Path]:
 
     ui_payload = _ui_sanity("grafana", df, runs, profile)
     ui_payload["generated_at_utc"] = ts
+    ui_payload["git"] = git_meta
+    ui_payload["source_modules"] = source_urls
 
     json_path.write_text(
         json.dumps(ui_payload, indent=2),
