@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import json
 import zipfile
 import pandas as pd
+from datetime import datetime, timezone
 
 # -------------------------------
 # ✅ PRODUCTION MODULE IMPORTS
@@ -72,6 +73,14 @@ def _write_debug_bundle(zip_path: Path, df: pd.DataFrame, debug_json: Dict[str, 
         zf.writestr(f"{prefix}_debug.json", json_bytes)
 
 
+def _utc_timestamp() -> str:
+    """
+    Returns a filesystem-safe UTC timestamp like:
+    2025-12-08T13-42-10Z
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+
+
 # -------------------------------
 # ✅ UI SANITY BUILDERS
 # -------------------------------
@@ -110,6 +119,10 @@ def _summarise_mapping(profile: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _ui_sanity(mode: str, df: pd.DataFrame, runs: List[Dict[str, Any]], profile: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Note: For HA, Heat_HA / COP_Graph_HA should exist.
+    For Grafana, these may be None (or you can extend later to use Grafana-specific columns).
+    """
     return {
         "mode": mode,
         "rows": len(df),
@@ -152,12 +165,18 @@ def run_ha(paths: SamplePaths) -> Tuple[Path, Path]:
     }
 
     _ensure_artifacts(paths.artifacts)
-    zip_path = paths.artifacts / "ha_debug_bundle.zip"
-    json_path = paths.artifacts / "ha_ui_sanity.json"
+    ts = _utc_timestamp()
+
+    zip_path = paths.artifacts / f"ha_debug_bundle_{ts}.zip"
+    json_path = paths.artifacts / f"ha_ui_sanity_{ts}.json"
 
     _write_debug_bundle(zip_path, df, debug_json, "ha")
+
+    ui_payload = _ui_sanity("ha", df, runs, profile)
+    ui_payload["generated_at_utc"] = ts
+
     json_path.write_text(
-        json.dumps(_ui_sanity("ha", df, runs, profile), indent=2),
+        json.dumps(ui_payload, indent=2),
         encoding="utf-8",
     )
 
@@ -189,12 +208,18 @@ def run_grafana(paths: SamplePaths) -> Tuple[Path, Path]:
     }
 
     _ensure_artifacts(paths.artifacts)
-    zip_path = paths.artifacts / "grafana_debug_bundle.zip"
-    json_path = paths.artifacts / "grafana_ui_sanity.json"
+    ts = _utc_timestamp()
+
+    zip_path = paths.artifacts / f"grafana_debug_bundle_{ts}.zip"
+    json_path = paths.artifacts / f"grafana_ui_sanity_{ts}.json"
 
     _write_debug_bundle(zip_path, df, debug_json, "grafana")
+
+    ui_payload = _ui_sanity("grafana", df, runs, profile)
+    ui_payload["generated_at_utc"] = ts
+
     json_path.write_text(
-        json.dumps(_ui_sanity("grafana", df, runs, profile), indent=2),
+        json.dumps(ui_payload, indent=2),
         encoding="utf-8",
     )
 
