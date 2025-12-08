@@ -1,0 +1,70 @@
+{
+  "therm_version": "2.0",
+  "profile_name": "Samsung - Grafana - Updated",
+  "mapping": {
+    "Power": "heat_pump_power_ch1",
+    "FlowTemp": "heat_pump_flow_temperature",
+    "ReturnTemp": "heat_pump_return_temperature",
+    "FlowRate": "heat_pump_flow_rate",
+    "OutdoorTemp": "heat_pump_outdoor_temperature",
+    "Room_1": "ecowitt_weather_indoor_temperature",
+    "Room_2": "caoimhe_s_room_temp_humidity_sensor_temperature",
+    "Room_3": "living_room_temp_humidity_temperature",
+    "Room_4": "oisin_s_bedroom_temp_humidity_sensor_temperature",
+    "Room_5": "playroom_temp_humidity_sensor_temperature",
+    "Room_7": "heat_pump_temp_humidity_sensor_temperature",
+    "Zone_1": "underfloor_pump",
+    "Zone_2": "downstairs_radiator_pump",
+    "Zone_3": "upstairs_radiator_pump",
+    "ValveMode": "heat_pump_3way_valve_position_value",
+    "Freq": "heat_pump_compressor_frequency",
+    "Defrost": "heat_pump_defrost_status",
+    "DHW_Active": "heat_pump_hot_water_status_value",
+    "DHW_Mode": "heat_pump_hot_water_mode_value",
+    "DHW_Temp": "heat_pump_hot_water_temperature",
+    "Heat": "heat_pump_heat_output",
+    "Indoor_Power": "heat_pump_indoor_power",
+    "Outdoor_Humidity": "openweathermap_humidity"
+  },
+  "units": {
+    "Power": "W",
+    "FlowTemp": "degC",
+    "ReturnTemp": "degC",
+    "FlowRate": "L/min",
+    "OutdoorTemp": "degC",
+    "Zone_1": "0/1",
+    "Zone_2": "0/1",
+    "Zone_3": "0/1",
+    "ValveMode": "Text",
+    "Freq": "Hz",
+    "Defrost": "0/1",
+    "DHW_Active": "0/1",
+    "DHW_Mode": "Text/Binary",
+    "DHW_Temp": "degC",
+    "Heat": "W",
+    "Indoor_Power": "W",
+    "Outdoor_Humidity": "%"
+  },
+  "ai_context": {
+    "hp_model": "Samsung Gen 6 Heat Pump",
+    "tariff_structure": "",
+    "property_context": "175sqm , A1 rated 4 bed detached house",
+    "operational_goals": ""
+  },
+  "exported_at": "2025-12-07T11:56:42.725981",
+  "rooms_per_zone": {
+    "Zone_1": [
+      "Room_1"
+    ],
+    "Zone_2": [
+      "Room_3",
+      "Room_5",
+      "Room_7"
+    ],
+    "Zone_3": [
+      "Room_2",
+      "Room_4"
+    ],
+    "Zone_4": []
+  }
+}

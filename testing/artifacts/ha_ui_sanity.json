@@ -1,0 +1,62 @@
+{
+  "mode": "ha",
+  "rows": 7195,
+  "heat_kwh": null,
+  "cop_mean": null,
+  "runs": {
+    "total_runs": 50,
+    "heating_runs": 40,
+    "dhw_runs": 10,
+    "defrost_runs": 0
+  },
+  "mapping": {
+    "zone_count": 3,
+    "room_count": 7,
+    "zones": [
+      {
+        "key": "Zone_1",
+        "label": "underfloor_pump"
+      },
+      {
+        "key": "Zone_2",
+        "label": "downstairs_radiator_pump"
+      },
+      {
+        "key": "Zone_3",
+        "label": "upstairs_radiator_pump"
+      }
+    ],
+    "rooms": [
+      {
+        "key": "Room_1",
+        "label": "main_bedroom_temperature"
+      },
+      {
+        "key": "Room_2",
+        "label": "heat_pump_temp_humidity_sensor_temperature"
+      },
+      {
+        "key": "Room_3",
+        "label": "ecowitt_weather_indoor_temperature"
+      },
+      {
+        "key": "Room_4",
+        "label": "caoimhe_s_room_temp_humidity_sensor_temperature"
+      },
+      {
+        "key": "Room_5",
+        "label": "living_room_temp_humidity_temperature"
+      },
+      {
+        "key": "Room_6",
+        "label": "oisin_s_bedroom_temp_humidity_sensor_temperature"
+      },
+      {
+        "key": "Room_7",
+        "label": "playroom_temp_humidity_sensor_temperature"
+      }
+    ],
+    "bad_zone_labels": [],
+    "bad_room_labels": []
+  }
+}

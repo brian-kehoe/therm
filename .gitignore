@@ -12,3 +12,5 @@ __pycache__/
 
 # Ignore specific data file
 sensor_heartbeat_baseline_seasonal.json
+testing/artifacts/grafana_debug_bundle.zip
+testing/artifacts/ha_debug_bundle.zip

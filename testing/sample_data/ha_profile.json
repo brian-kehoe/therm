@@ -1,0 +1,72 @@
+{
+  "therm_version": "2.0",
+  "profile_name": "Samsung - Home Assistant incl Hot Water Status",
+  "mapping": {
+    "Power": "sensor.heat_pump_power_ch1",
+    "FlowTemp": "sensor.heat_pump_flow_temperature",
+    "ReturnTemp": "sensor.heat_pump_return_temperature",
+    "FlowRate": "sensor.heat_pump_flow_rate",
+    "OutdoorTemp": "sensor.heat_pump_outdoor_temperature",
+    "Room_1": "sensor.main_bedroom_temperature",
+    "Room_2": "sensor.heat_pump_temp_humidity_sensor_temperature",
+    "Room_3": "sensor.ecowitt_weather_indoor_temperature",
+    "Room_4": "sensor.caoimhe_s_room_temp_humidity_sensor_temperature",
+    "Room_5": "sensor.living_room_temp_humidity_temperature",
+    "Room_6": "sensor.oisin_s_bedroom_temp_humidity_sensor_temperature",
+    "Room_7": "sensor.playroom_temp_humidity_sensor_temperature",
+    "Zone_1": "binary_sensor.underfloor_pump",
+    "Zone_2": "binary_sensor.downstairs_radiator_pump",
+    "Zone_3": "binary_sensor.upstairs_radiator_pump",
+    "ValveMode": "sensor.heat_pump_3way_valve_position_value",
+    "Freq": "sensor.heat_pump_compressor_frequency",
+    "Defrost": "sensor.heat_pump_defrost_status",
+    "DHW_Active": "sensor.heat_pump_hot_water_status",
+    "DHW_Mode": "sensor.heat_pump_hot_water_mode_value",
+    "DHW_Temp": "sensor.heat_pump_hot_water_temperature",
+    "Indoor_Power": "sensor.heat_pump_indoor_power",
+    "Outdoor_Humidity": "sensor.openweathermap_humidity",
+    "Wind_Speed": "sensor.openweathermap_wind_speed"
+  },
+  "units": {
+    "Power": "W",
+    "FlowTemp": "degC",
+    "ReturnTemp": "degC",
+    "FlowRate": "L/min",
+    "OutdoorTemp": "degC",
+    "Zone_1": "0/1",
+    "Zone_2": "0/1",
+    "Zone_3": "0/1",
+    "ValveMode": "Text",
+    "Freq": "Hz",
+    "Defrost": "0/1",
+    "DHW_Active": "0/1",
+    "DHW_Mode": "Text/Binary",
+    "DHW_Temp": "degC",
+    "Indoor_Power": "W",
+    "Outdoor_Humidity": "%",
+    "Wind_Speed": "m/s"
+  },
+  "ai_context": {
+    "hp_model": "Samsung Gen 6",
+    "tariff_structure": "",
+    "property_context": "",
+    "operational_goals": ""
+  },
+  "exported_at": "2025-12-07T11:52:45.150883",
+  "rooms_per_zone": {
+    "Zone_1": [
+      "Room_3"
+    ],
+    "Zone_2": [
+      "Room_2",
+      "Room_5",
+      "Room_7"
+    ],
+    "Zone_3": [
+      "Room_1",
+      "Room_4",
+      "Room_6"
+    ],
+    "Zone_4": []
+  }
+}
