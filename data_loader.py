@@ -97,6 +97,56 @@ def _normalise_time_column(
 
 
 # ----------------------------------------------------------------------
+# SOURCE DETECTION (HA vs Grafana/Influx)
+# ----------------------------------------------------------------------
+
+def detect_file_source(file_obj) -> str:
+    """
+    Heuristically detect whether a CSV is a Home Assistant history export
+    or a Grafana/Influx export.
+
+    Returns: "ha", "grafana", or "unknown"
+    """
+    try:
+        pos = file_obj.tell()
+    except Exception:
+        pos = None
+
+    try:
+        df_head = pd.read_csv(file_obj, nrows=20)
+        cols = set(df_head.columns.str.lower())
+
+        has_entity = "entity_id" in cols
+        has_state = "state" in cols
+        has_value = "value" in cols
+        has_last_changed = any(c in cols for c in ["last_changed", "last_updated"])
+        has_time = any(c in cols for c in [c.lower() for c in _TIME_CANDIDATES])
+
+        # Home Assistant history exports usually have state + last_changed + entity_id
+        if has_entity and has_state and has_last_changed:
+            return "ha"
+
+        # Grafana/Influx exports typically have value + Time/Date + entity_id
+        if has_entity and has_value and has_time:
+            return "grafana"
+
+        # If we see state without last_changed (some HA variants), still lean HA
+        if has_entity and has_state and not has_value:
+            return "ha"
+
+    except Exception:
+        return "unknown"
+    finally:
+        if pos is not None:
+            try:
+                file_obj.seek(pos)
+            except Exception:
+                pass
+
+    return "unknown"
+
+
+# ----------------------------------------------------------------------
 # MODBUS INTERPRETATION HOOK (SKELETON)
 # ----------------------------------------------------------------------
 

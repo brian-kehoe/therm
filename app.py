@@ -93,29 +93,30 @@ with st.sidebar.expander("Data source & files", expanded=in_system_setup):
         st.session_state["uploaded_filenames"] = [f.name for f in uploaded_files]
 
         # ------------------------------------------------------------------
-        # New: per-file source selector (Grafana vs Home Assistant)
+        # New: auto-detect per-file source (Grafana vs Home Assistant),
+        # with manual override.
         # ------------------------------------------------------------------
-        # Initialise or refresh the file_sources mapping
         file_sources = st.session_state.get("file_sources", {})
 
         st.markdown("**File source type:**")
         for idx, f in enumerate(uploaded_files):
             fname = getattr(f, "name", f"file_{idx}")
-            # Default to existing choice if present, else assume Grafana/Influx
-            default_source = file_sources.get(fname, "grafana")
+
+            auto_detected = data_loader.detect_file_source(f)
+            # Prefer previously selected source, else auto-detected, else grafana
+            default_source = file_sources.get(fname, auto_detected or "grafana")
 
             source_label = st.radio(
                 label=f"Source for `{fname}`",
                 options=["Grafana / Influx CSV", "Home Assistant CSV"],
                 index=0 if default_source == "grafana" else 1,
                 key=f"file_source_{idx}",
+                help=f"Auto-detected: {auto_detected or 'unknown'}",
             )
 
-            # Normalise to a simple internal code
             internal_code = "grafana" if source_label.startswith("Grafana") else "ha"
             file_sources[fname] = internal_code
 
-        # Store back in session state so other modules can use it
         st.session_state["file_sources"] = file_sources
         # ------------------------------------------------------------------
 
