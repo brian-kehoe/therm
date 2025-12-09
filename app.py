@@ -77,6 +77,8 @@ st.markdown(
     [data-testid="stSidebar"] .block-container { padding-top: 0.75rem !important; }
     /* Nudge sidebar logo upward a bit more */
     [data-testid="stSidebar"] img { margin-top: -22px !important; }
+    /* Move the sidebar tagline only */
+    .sidebar-tagline { margin-top: -30px !important; display: block; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -96,7 +98,10 @@ if "csv_uploader_version" not in st.session_state:
 
 # === SIDEBAR HEADER ===
 st.sidebar.image("assets/therm_logo.png", width="stretch")
-st.sidebar.markdown("**Thermal Health & Efficiency Reporting Module v2 beta**")
+st.sidebar.markdown(
+    "<div class='sidebar-tagline'><strong>Thermal Health & Efficiency Reporting Module v2 beta</strong></div><div style='height:10px'></div>",
+    unsafe_allow_html=True,
+)
 
 with st.sidebar.expander("Data source & files", expanded=in_system_setup):
     _log("sidebar_upload_start")
@@ -759,6 +764,8 @@ if uploaded_files:
                     )
 
 else:
+    # Nudge initial info message down slightly
+    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
     st.info("Upload CSV files to begin.")
     st.sidebar.markdown("---")
     with st.sidebar.expander("About therm"):
