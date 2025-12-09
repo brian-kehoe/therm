@@ -13,6 +13,16 @@ from schema_defs import (
 import config_manager
 
 
+def _log(msg: str) -> None:
+    """Best-effort console logger for profiling."""
+    try:
+        import sys
+        ts = datetime.utcnow().isoformat()
+        sys.stdout.write(f"[mapping_ui] {ts} {msg}\n")
+    except Exception:
+        pass
+
+
 # -------------------------------------------------------------------
 # FAST ENTITY SCAN (streaming) TO AVOID LOADING HUGE HA FILES
 # -------------------------------------------------------------------
@@ -184,6 +194,7 @@ def render_configuration_interface(uploaded_files):
             try:
                 loaded = json.load(uploaded_config)
                 defaults.update(loaded)
+                _log(f"profile_load file={getattr(uploaded_config,'name',None)} secs={time.time()-t_profile:.3f}")
 
                 # Build a simple signature for the currently uploaded profile
                 current_sig = (uploaded_config.name, getattr(uploaded_config, "size", None))
@@ -218,6 +229,7 @@ def render_configuration_interface(uploaded_files):
                         st.session_state[f"link_{z_key}"] = links
 
                 st.success(f"Loaded {defaults['profile_name']}")
+                _log(f"profile_apply_defaults secs={time.time()-t_profile:.3f}")
             except Exception:
                 st.error("Failed to load profile JSON.")
 
