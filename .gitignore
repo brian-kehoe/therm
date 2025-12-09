@@ -22,4 +22,3 @@ testing/artifacts/grafana_merged*.csv
 testing/artifacts/grafana_debug.json
 profiles
 testing/artifacts/therm_debug_*/*
-
