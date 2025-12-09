@@ -232,7 +232,7 @@ def render_run_inspector(df, runs_list):
             title="Power & Efficiency",
             hovermode="x unified",
         )
-        st.plotly_chart(fig, use_container_width=True, key="run_power_chart")
+        st.plotly_chart(fig, width="stretch", key="run_power_chart")
 
     # ------------------------------------------------------------------
     # TAB 2: Hydraulics (incl. Ghost Pumping)
@@ -423,7 +423,7 @@ def render_run_inspector(df, runs_list):
             height=chart_height,
             hovermode="x unified",
         )
-        st.plotly_chart(fig2, use_container_width=True, key="run_hydro_chart")
+        st.plotly_chart(fig2, width="stretch", key="run_hydro_chart")
 
     # ------------------------------------------------------------------
     # TAB 3: Rooms
@@ -513,7 +513,7 @@ def render_run_inspector(df, runs_list):
                 ),
                 height=350,
             )
-            st.plotly_chart(fig3, use_container_width=True, key="run_rooms_chart")
+            st.plotly_chart(fig3, width="stretch", key="run_rooms_chart")
         else:
             st.info("Room temperature analysis is skipped for DHW runs.")
 
