@@ -17,3 +17,4 @@ testing/artifacts/ha_debug_bundle*.zip
 testing/artifacts/grafana_ui_sanity_*.json
 testing/artifacts/ha_ui_sanity_*.json
 .claude/settings.local.json
+testing/artifacts/grafana_merged*.csv
