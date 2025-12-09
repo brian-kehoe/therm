@@ -68,6 +68,16 @@ def _scroll_to_top_if_requested() -> None:
 
 
 st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="assets/therm_logo_browser_tab.png")
+# Reduce top padding in main and sidebar to pull content up
+st.markdown(
+    """
+    <style>
+    .block-container { padding-top: 1rem !important; }
+    [data-testid="stSidebar"] .block-container { padding-top: 0.5rem !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Decide whether we're in System Setup (no processed config yet)
 _log("app_run_start")
