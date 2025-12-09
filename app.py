@@ -72,8 +72,11 @@ st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="assets/
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 1rem !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 0.5rem !important; }
+    /* Slightly reduced padding without clipping titles */
+    .block-container { padding-top: 1.5rem !important; }
+    [data-testid="stSidebar"] .block-container { padding-top: 0.75rem !important; }
+    /* Nudge sidebar logo upward a bit more */
+    [data-testid="stSidebar"] img { margin-top: -12px !important; }
     </style>
     """,
     unsafe_allow_html=True,
