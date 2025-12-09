@@ -18,6 +18,13 @@ import ha_loader
 import processing
 from utils import safe_div
 
+# ----------------------------------------------------------------------
+# Lightweight console logger with timestamps (UTC)
+# ----------------------------------------------------------------------
+def _log(msg: str) -> None:
+    """Console logging (disabled by default)."""
+    return
+
 
 # --- FIX: Console Error Suppression ---
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empty slice")
@@ -63,6 +70,7 @@ def _scroll_to_top_if_requested() -> None:
 st.set_page_config(page_title="therm v2 beta", layout="wide", page_icon="assets/therm_logo_browser_tab.png")
 
 # Decide whether we're in System Setup (no processed config yet)
+_log("app_run_start")
 in_system_setup = "system_config" not in st.session_state
 
 # Apply any one-shot scroll request
@@ -78,6 +86,7 @@ st.sidebar.image("assets/therm_logo.png", width="stretch")
 st.sidebar.markdown("**Thermal Health & Efficiency Reporting Module v2 beta**")
 
 with st.sidebar.expander("Data source & files", expanded=in_system_setup):
+    _log("sidebar_upload_start")
     # Use a versioned key so we can hard-reset the uploader
     uploaded_files = st.file_uploader(
         "Upload CSV(s)",
@@ -85,6 +94,7 @@ with st.sidebar.expander("Data source & files", expanded=in_system_setup):
         type="csv",
         key=f"csv_uploader_{st.session_state['csv_uploader_version']}",
     )
+    _log(f"sidebar_upload_done files={len(uploaded_files) if uploaded_files else 0}")
 
     show_inspector = st.checkbox("Show File Inspector", value=False)
 
@@ -433,14 +443,18 @@ if uploaded_files:
     else:
         # --- CONFIGURATION WORKFLOW ---
         if "system_config" not in st.session_state:
+            _log("config_render_start")
             config_object = mapping_ui.render_configuration_interface(uploaded_files)
+            _log("config_render_done")
             if config_object:
                 st.session_state["system_config"] = config_object
                 st.rerun()
 
         else:
             # 1. GET DATA (Manual Cache Check)
+            _log("process_data_start")
             data = get_processed_data(uploaded_files, st.session_state["system_config"])
+            _log("process_data_done")
 
             # 2. Sidebar: Analysis Mode, Global Stats (canonical), Configuration, Debugger
             with st.sidebar:

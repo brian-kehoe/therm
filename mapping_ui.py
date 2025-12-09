@@ -14,13 +14,8 @@ import config_manager
 
 
 def _log(msg: str) -> None:
-    """Best-effort console logger for profiling."""
-    try:
-        import sys
-        ts = datetime.utcnow().isoformat()
-        sys.stdout.write(f"[mapping_ui] {ts} {msg}\n")
-    except Exception:
-        pass
+    """Best-effort console logger for profiling (disabled by default)."""
+    return
 
 
 # -------------------------------------------------------------------
@@ -170,6 +165,8 @@ def render_sensor_row(label, internal_key, options, defaults, required=False, he
     return sel, unit_val
 
 def render_configuration_interface(uploaded_files):
+    t_render_start = time.time()
+    _log("render_configuration_interface start")
     st.markdown("## ️ System Setup")
 
     col_load, col_name = st.columns([1, 2])
@@ -455,8 +452,10 @@ def render_configuration_interface(uploaded_files):
             else:
                 # Flag the main app to scroll to top on the next render
                 st.session_state["scroll_to_top"] = True
+                _log(f"render_configuration_interface done secs={time.time()-t_render_start:.3f} result=config_object")
                 return config_object
 
+    _log(f"render_configuration_interface done secs={time.time()-t_render_start:.3f} result=None")
     return None
 
 
