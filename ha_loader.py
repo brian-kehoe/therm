@@ -25,6 +25,7 @@
 
 import pandas as pd
 import numpy as np
+import time
 from typing import List, Dict, Any, Callable, Optional
 
 from inspector import is_binary_sensor, safe_smart_parse
@@ -371,13 +372,21 @@ def process_ha_files(
     # 1. LOAD CSVs
     # ------------------------------------------------------------------
     dfs = []
+    t_start = time.time()
     total = len(files)
 
     for i, f in enumerate(files):
         if progress_cb:
             progress_cb(f"Reading HA CSV {i+1}/{total}", (i + 1) / total)
+        t_read = time.time()
         f.seek(0)
         df = pd.read_csv(f)
+        read_secs = time.time() - t_read
+        try:
+            import sys
+            sys.stdout.write(f"[ha_loader] read_csv secs={read_secs:.3f} rows={len(df)}\n")
+        except Exception:
+            pass
         dfs.append(df)
 
     if not dfs:
@@ -401,43 +410,67 @@ def process_ha_files(
     # 3. INFER DTYPES PER ENTITY
     # ------------------------------------------------------------------
     dtype_map: Dict[str, str] = {}
+    t_dtype = time.time()
     for eid, grp in long.groupby("entity_id"):
         dtype_map[eid] = _infer_dtype(grp["state"])
+    dtype_secs = time.time() - t_dtype
 
     # ------------------------------------------------------------------
     # 4. CONVERT VALUES
     # ------------------------------------------------------------------
+    t_convert = time.time()
     long["value"] = [
         _convert_value(v, dtype_map.get(eid, "string"))
         for v, eid in zip(long["state"], long["entity_id"])
     ]
+    convert_secs = time.time() - t_convert
 
     # ------------------------------------------------------------------
-    # 5. GROUP DUPLICATES → ONE VALUE PER (timestamp, entity_id)
+    # 5. GROUP DUPLICATES  ONE VALUE PER (timestamp, entity_id)
     # ------------------------------------------------------------------
-    def _agg_group(series):
-        """Mean for numeric/binary, last valid for strings."""
-        if series.dtype == object:
-            return series.ffill().iloc[-1]
-        else:
-            return pd.to_numeric(series, errors="coerce").mean()
+    # Optimised: split numeric vs string to avoid slow per-group apply().
+    t_group = time.time()
+    numeric_entities = {eid for eid, dt in dtype_map.items() if dt != 'string'}
+    long['entity_id'] = long['entity_id'].astype('category')
 
-    grouped = (
-        long.groupby([ts_col, "entity_id"])["value"]
-        .apply(_agg_group)
-        .reset_index()
-    )
+    grouped_frames = []
 
-    # ------------------------------------------------------------------
+    if numeric_entities:
+        num_mask = long['entity_id'].isin(numeric_entities)
+        num_df = long.loc[num_mask, [ts_col, 'entity_id', 'value']]
+        grouped_num = (
+            num_df.groupby([ts_col, 'entity_id'], sort=False, observed=True)['value']
+            .mean()
+        )
+        grouped_frames.append(grouped_num)
+
+    str_mask = ~long['entity_id'].isin(numeric_entities)
+    if str_mask.any():
+        str_df = long.loc[str_mask, [ts_col, 'entity_id', 'value']]
+        grouped_str = (
+            str_df.groupby([ts_col, 'entity_id'], sort=False, observed=True)['value']
+            .last()
+        )
+        grouped_frames.append(grouped_str)
+
+    if grouped_frames:
+        grouped = pd.concat(grouped_frames).reset_index()
+    else:
+        grouped = pd.DataFrame(columns=[ts_col, 'entity_id', 'value'])
+    group_secs = time.time() - t_group
     # 6. PIVOT TO WIDE
     # ------------------------------------------------------------------
+    t_pivot = time.time()
     wide = grouped.pivot(index=ts_col, columns="entity_id", values="value")
     wide.index = pd.to_datetime(wide.index)
+    pivot_secs = time.time() - t_pivot
 
     # ------------------------------------------------------------------
     # 7. RESAMPLE TO 1-MINUTE
     # ------------------------------------------------------------------
-    df_wide = wide.resample("1T").last().ffill(limit=120)
+    t_resample = time.time()
+    df_wide = wide.resample("1min").last().ffill(limit=120)
+    resample_secs = time.time() - t_resample
 
     # ------------------------------------------------------------------
     # 8. APPLY MODBUS / HA-MAPPED INTERPRETATION
@@ -473,15 +506,33 @@ def process_ha_files(
     # ------------------------------------------------------------------
     # 11. RUN PHYSICS ENGINE
     # ------------------------------------------------------------------
+    t_gate = time.time()
     df_engine = processing.apply_gatekeepers(df, user_config)
+    gate_secs = time.time() - t_gate
     if df_engine is None or df_engine.empty:
         return None
 
     # ------------------------------------------------------------------
     # 12. RUN DETECTOR + DAILY STATS
     # ------------------------------------------------------------------
+    t_runs = time.time()
     runs = processing.detect_runs(df_engine, user_config)
+    t_daily = time.time()
     daily = processing.get_daily_stats(df_engine)
+    daily_secs = time.time() - t_daily
+    runs_secs = t_daily - t_runs
+
+    total_secs = time.time() - t_start
+    try:
+        import sys
+        sys.stdout.write(
+            "[ha_loader] timing "
+            f"read={read_secs:.3f}s dtype={dtype_secs:.3f}s convert={convert_secs:.3f}s "
+            f"group={group_secs:.3f}s pivot={pivot_secs:.3f}s resample={resample_secs:.3f}s "
+            f"gate={gate_secs:.3f}s runs={runs_secs:.3f}s daily={daily_secs:.3f}s total={total_secs:.3f}s\n"
+        )
+    except Exception:
+        pass
 
     # ------------------------------------------------------------------
     # 13. OUTPUT STRUCTURE (same as Grafana loader)

@@ -155,6 +155,14 @@ def get_processed_data(files, user_config):
     if not files:
         return None
 
+    import time
+    def _log(msg: str) -> None:
+        try:
+            import sys
+            sys.stdout.write(f"[process] {msg}\n")
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # 1. Decide which data source is being used for this run
     # ------------------------------------------------------------------
@@ -194,12 +202,14 @@ def get_processed_data(files, user_config):
     status_container = st.status("Processing Data...", expanded=True)
 
     try:
+        t_start = time.time()
         # ------------------------------------------------------------------
         # 3. Source-specific loading
         # ------------------------------------------------------------------
         if dataset_source == "ha":
             # Home Assistant mode
             status_container.write("Loading Home Assistant history CSV data...")
+            t_ha = time.time()
 
             def progress_cb_ha(label: str, frac: float) -> None:
                 """Progress callback expected by ha_loader."""
@@ -210,6 +220,7 @@ def get_processed_data(files, user_config):
                 status_container.write(f"{label} ({pct}%)")
 
             res = ha_loader.process_ha_files(files, user_config, progress_cb=progress_cb_ha)
+            _log(f"ha_loader.process_ha_files secs={time.time()-t_ha:.3f}")
             if not res or res.get("df") is None or res["df"].empty:
                 status_container.update(
                     label="Error: No usable Home Assistant data found.",
@@ -231,19 +242,27 @@ def get_processed_data(files, user_config):
             status_container.write("Loading and merging files (Numeric + State)...")
             progress_cb = lambda t, p: status_container.write(f"Reading: {t}")
 
+            t_load = time.time()
             res = data_loader.load_and_clean_data(files, user_config, progress_cb)
+            _log(f"data_loader.load_and_clean_data secs={time.time()-t_load:.3f}")
             if not res or res.get("df") is None or res["df"].empty:
                 status_container.update(label="Error: No data found", state="error")
                 return None
 
             status_container.write("Applying physics engine...")
+            t_phys = time.time()
             df = processing.apply_gatekeepers(res["df"], user_config)
+            _log(f"processing.apply_gatekeepers secs={time.time()-t_phys:.3f}")
 
             status_container.write("Detecting Runs (DHW/Heating)...")
+            t_runs = time.time()
             runs = processing.detect_runs(df, user_config)
+            _log(f"processing.detect_runs secs={time.time()-t_runs:.3f}")
 
             status_container.write("Calculating daily stats...")
+            t_daily = time.time()
             daily = processing.get_daily_stats(df)
+            _log(f"processing.get_daily_stats secs={time.time()-t_daily:.3f}")
 
             patterns = res["patterns"]
             raw_history = res.get("raw_history")
@@ -280,6 +299,7 @@ def get_processed_data(files, user_config):
         st.session_state["cached"] = cache
         st.session_state["heartbeat_baseline"] = baselines
         st.session_state["heartbeat_baseline_path"] = baseline_path
+        _log(f"total secs={time.time()-t_start:.3f} source={dataset_source} rows={len(df) if df is not None else 0}")
         return cache
 
     except Exception as e:
