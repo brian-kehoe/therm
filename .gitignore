@@ -19,3 +19,5 @@ testing/artifacts/ha_ui_sanity_*.json
 .claude/settings.local.json
 testing/artifacts/grafana_merged*.csv
 testing/artifacts/grafana_debug.json
+profiles
+

@@ -167,9 +167,10 @@ def render_sensor_row(label, internal_key, options, defaults, required=False, he
 def render_configuration_interface(uploaded_files):
     t_render_start = time.time()
     _log("render_configuration_interface start")
-    st.markdown("## ️ System Setup")
 
-    col_load, col_name = st.columns([1, 2])
+    # Two containers: the top block stays sticky; the rest scrolls normally.
+    top_section = st.container()
+    body_section = st.container()
 
     # Defaults that can be overridden by a loaded profile
     defaults = {
@@ -185,254 +186,262 @@ def render_configuration_interface(uploaded_files):
     profile_loaded = False
     loaded_profile_name = None
 
-    # --- Load Profile (JSON) ---
-    with col_load:
-        uploaded_config = st.file_uploader(" Load Profile", type="json", key="cfg_up")
-        if uploaded_config:
-            t_profile = time.time()
-            try:
-                loaded = json.load(uploaded_config)
-                defaults.update(loaded)
-                _log(f"profile_load file={getattr(uploaded_config,'name',None)} secs={time.time()-t_profile:.3f}")
+    with top_section:
+        st.markdown("<div class='setup-sticky'>", unsafe_allow_html=True)
+        st.markdown("## System Setup")
 
-                # Build a simple signature for the currently uploaded profile
-                current_sig = (uploaded_config.name, getattr(uploaded_config, "size", None))
-                prev_sig = st.session_state.get("loaded_profile_signature")
+        col_load, col_name = st.columns([1, 2])
 
-                # Only push mapping/unit values into session_state when:
-                #   - a profile is loaded for the first time, or
-                #   - a *different* profile file is chosen
-                if current_sig != prev_sig:
-                    st.session_state["loaded_profile_signature"] = current_sig
+        # --- Load Profile (JSON) ---
+        with col_load:
+            uploaded_config = st.file_uploader(" Load Profile", type="json", key="cfg_up")
+            if uploaded_config:
+                t_profile = time.time()
+                try:
+                    loaded = json.load(uploaded_config)
+                    defaults.update(loaded)
+                    _log(f"profile_load file={getattr(uploaded_config,'name',None)} secs={time.time()-t_profile:.3f}")
 
-                    # 1. Clear any existing mapping/unit keys (only those used)
-                    for k in defaults.get("mapping", {}):
-                        map_key = f"map_{k}"
-                        if map_key in st.session_state:
-                            del st.session_state[map_key]
+                    # Build a simple signature for the currently uploaded profile
+                    current_sig = (uploaded_config.name, getattr(uploaded_config, "size", None))
+                    prev_sig = st.session_state.get("loaded_profile_signature")
 
-                    for k in defaults.get("units", {}):
-                        unit_key = f"unit_{k}"
-                        if unit_key in st.session_state:
-                            del st.session_state[unit_key]
+                    # Only push mapping/unit values into session_state when:
+                    #   - a profile is loaded for the first time, or
+                    #   - a *different* profile file is chosen
+                    if current_sig != prev_sig:
+                        st.session_state["loaded_profile_signature"] = current_sig
 
-                    # 2. Apply defaults freshly
-                    for k, v in defaults.get("mapping", {}).items():
-                        st.session_state[f"map_{k}"] = v
+                        # 1. Clear any existing mapping/unit keys (only those used)
+                        for k in defaults.get("mapping", {}):
+                            map_key = f"map_{k}"
+                            if map_key in st.session_state:
+                                del st.session_state[map_key]
 
-                    for k, v in defaults.get("units", {}).items():
-                        st.session_state[f"unit_{k}"] = v
+                        for k in defaults.get("units", {}):
+                            unit_key = f"unit_{k}"
+                            if unit_key in st.session_state:
+                                del st.session_state[unit_key]
 
-                    # 3. Apply room links per zone
-                    for z_key, links in (defaults.get("rooms_per_zone") or {}).items():
-                        st.session_state[f"link_{z_key}"] = links
+                        # 2. Apply defaults freshly
+                        for k, v in defaults.get("mapping", {}).items():
+                            st.session_state[f"map_{k}"] = v
 
-                _log(f"profile_apply_defaults secs={time.time()-t_profile:.3f}")
-                profile_loaded = True
-                loaded_profile_name = defaults["profile_name"]
-            except Exception:
-                st.error("Failed to load profile JSON.")
+                        for k, v in defaults.get("units", {}).items():
+                            st.session_state[f"unit_{k}"] = v
 
+                        # 3. Apply room links per zone
+                        for z_key, links in (defaults.get("rooms_per_zone") or {}).items():
+                            st.session_state[f"link_{z_key}"] = links
 
-    # Manual refresh button for entity discovery (skips auto-scan on profile load)
-    if uploaded_files:
-        with st.expander("Entity Discovery", expanded=False):
-            files_key = sorted(
-                (getattr(f, "name", ""), getattr(f, "size", 0)) for f in uploaded_files
-            )
-            if st.button("Refresh entities from uploaded files", type="secondary"):
-                t_scan = time.time()
-                st.session_state["available_sensors"] = get_all_unique_entities(uploaded_files)
-                st.session_state["available_sensors_files_key"] = files_key
-                st.success(f"Entities refreshed in {time.time()-t_scan:.3f}s")
-            # Show cached results if present
-            cached_entities = st.session_state.get("available_sensors", [])
-            if cached_entities:
-                st.caption(f"{len(cached_entities)} entities cached.")
-            else:
-                st.caption("Entities will be loaded from profile mapping unless refreshed.")
+                    _log(f"profile_apply_defaults secs={time.time()-t_profile:.3f}")
+                    profile_loaded = True
+                    loaded_profile_name = defaults["profile_name"]
+                except Exception:
+                    st.error("Failed to load profile JSON.")
 
-    # Build options list:
-    #   - Entities from the loaded profile mapping
-    #   - PLUS any entities discovered/cached from files (if refreshed)
-    profile_entities = list((defaults.get("mapping") or {}).values())
-    combined_entities = sorted(set(profile_entities + available_entities))
-    options = ["None"] + combined_entities
-
-    # --- Profile name ---
-    with col_name:
-        profile_name = st.text_input("Profile Name", value=defaults["profile_name"])
-        if profile_loaded and loaded_profile_name:
-            st.success(f"Loaded {loaded_profile_name}")
-
-    # Reserve a top action bar so buttons render near the top of the form
-    action_bar_top = st.container()
-
-    user_map: dict = {}
-    user_units: dict = {}
-
-    # ------------------------------------------------------------------
-    # 1. Critical Sensors
-    # ------------------------------------------------------------------
-    st.subheader("1. Critical Sensors")
-    for key, d in REQUIRED_SENSORS.items():
-        s, u = render_sensor_row(
-            d["label"],
-            key,
-            options,
-            defaults,
-            required=True,
-            help_text=d["description"],
-        )
-        if s != "None":
-            user_map[key] = s
-            if u:
-                user_units[key] = u
-
-    # ------------------------------------------------------------------
-    # 2. Recommended
-    # ------------------------------------------------------------------
-    st.subheader("2. Recommended")
-    for key, d in RECOMMENDED_SENSORS.items():
-        s, u = render_sensor_row(
-            d["label"],
-            key,
-            options,
-            defaults,
-            required=False,
-            help_text=d["description"],
-        )
-        if s != "None":
-            user_map[key] = s
-            if u:
-                user_units[key] = u
-
-    # ------------------------------------------------------------------
-    # 3. Zones & Rooms
-    # ------------------------------------------------------------------
-    st.subheader("3. Zones & Rooms")
-
-    # Always define this so it exists when Step B runs
-    mapped_rooms_labels: dict = {}
-
-    # Step A: Map Room Sensors
-    with st.expander("Step A: Map Room Sensors", expanded=True):
-        r_cols = st.columns(2)
-        for i in range(1, 9):
-            r_key = f"{ROOM_SENSOR_PREFIX}{i}"
-            with r_cols[(i - 1) % 2]:
-                r_s, _ = render_sensor_row(
-                    f"Room Sensor {i}",
-                    r_key,
-                    options,
-                    defaults,
-                    required=False,
-                    help_text=None,
+        # Manual refresh button for entity discovery (skips auto-scan on profile load)
+        if uploaded_files:
+            with st.expander("Entity Discovery", expanded=False):
+                files_key = sorted(
+                    (getattr(f, "name", ""), getattr(f, "size", 0)) for f in uploaded_files
                 )
-                if r_s != "None":
-                    user_map[r_key] = r_s
-                    mapped_rooms_labels[r_key] = r_s
+                if st.button("Refresh entities from uploaded files", type="secondary"):
+                    t_scan = time.time()
+                    st.session_state["available_sensors"] = get_all_unique_entities(uploaded_files)
+                    st.session_state["available_sensors_files_key"] = files_key
+                    st.success(f"Entities refreshed in {time.time()-t_scan:.3f}s")
+                # Show cached results if present
+                cached_entities = st.session_state.get("available_sensors", [])
+                if cached_entities:
+                    st.caption(f"{len(cached_entities)} entities cached.")
+                else:
+                    st.caption("Entities will be loaded from profile mapping unless refreshed.")
 
-    # Step B: Configure Zones & Link Rooms
-    with st.expander("Step B: Configure Zones & Link Rooms", expanded=True):
-        rooms_per_zone: dict = {}
+        # Build options list:
+        #   - Entities from the loaded profile mapping
+        #   - PLUS any entities discovered/cached from files (if refreshed)
+        profile_entities = list((defaults.get("mapping") or {}).values())
+        combined_entities = sorted(set(profile_entities + available_entities))
+        options = ["None"] + combined_entities
 
-        # Friendly labels for rooms: "Kitchen (Room_1)" etc.
-        friendly_room_options = {
-            k: f"{v} ({k})" for k, v in mapped_rooms_labels.items()
-        }
-        room_keys_list = list(friendly_room_options.keys())
+        # --- Profile name ---
+        with col_name:
+            profile_name = st.text_input("Profile Name", value=defaults["profile_name"])
+            if profile_loaded and loaded_profile_name:
+                st.success(f"Loaded {loaded_profile_name}")
 
-        for z_key, z_d in ZONE_SENSORS.items():
-            st.markdown(f"**{z_d['label']}**")
+        # Top action bar (will be sticky with CSS)
+        action_bar_top = st.container()
+        st.markdown("</div>", unsafe_allow_html=True)
 
-            z_s, z_u = render_sensor_row(
-                "Zone Pump/Valve (Binary)",
-                z_key,
-                options,
-                defaults,
-                required=False,
-                help_text=z_d["description"],
-            )
-            if z_s != "None":
-                user_map[z_key] = z_s
-                if u:
-                    user_units[z_key] = z_u
-            else:
-                # If zone unmapped, clear any lingering room links in session state
-                if f"link_{z_key}" in st.session_state:
-                    st.session_state[f"link_{z_key}"] = []
+    # Everything below scrolls independently of the sticky section
+    with body_section:
+        user_map: dict = {}
+        user_units: dict = {}
 
-            saved_links = defaults.get("rooms_per_zone", {}).get(z_key, [])
-            valid_defaults = [r for r in saved_links if r in room_keys_list] if z_s != "None" else []
-
-            # Avoid Streamlit warning when default + session_state both set:
-            # only pass default if the key is not already in session_state.
-            multiselect_kwargs = {
-                "format_func": lambda x: friendly_room_options[x],
-                "key": f"link_{z_key}",
-                "help": "Select which room sensors belong to this zone.",
-            }
-            if f"link_{z_key}" not in st.session_state:
-                multiselect_kwargs["default"] = valid_defaults
-
-            selected_keys = st.multiselect(
-                f"Select rooms controlled by {z_d['label']}:",
-                options=room_keys_list,
-                **multiselect_kwargs,
-            )
-            rooms_per_zone[z_key] = selected_keys
-
-            st.markdown("---")
-
-        # If a zone was unmapped (set to None), clear its room links to avoid stale associations
-        for z_key in list(rooms_per_zone.keys()):
-            if z_key not in user_map:
-                rooms_per_zone[z_key] = []
-
-    # ------------------------------------------------------------------
-    # 4. Advanced / Environmental (alphabetical)
-    # ------------------------------------------------------------------
-    with st.expander("➕ Advanced / Environmental"):
-        merged = {**OPTIONAL_SENSORS, **ENVIRONMENTAL_SENSORS}
-        for key, d in sorted(
-            merged.items(), key=lambda kv: kv[1].get("label", kv[0]).lower()
-        ):
+        # ------------------------------------------------------------------
+        # 1. Critical Sensors
+        # ------------------------------------------------------------------
+        for key, d in REQUIRED_SENSORS.items():
             s, u = render_sensor_row(
                 d["label"],
                 key,
                 options,
                 defaults,
-                required=False,
-                help_text=d.get("description", None),
+                required=True,
+                help_text=d["description"],
             )
             if s != "None":
                 user_map[key] = s
                 if u:
                     user_units[key] = u
 
-    st.divider()
+        # ------------------------------------------------------------------
+        # 2. Recommended
+        # ------------------------------------------------------------------
+        st.subheader("2. Recommended")
+        for key, d in RECOMMENDED_SENSORS.items():
+            s, u = render_sensor_row(
+                d["label"],
+                key,
+                options,
+                defaults,
+                required=False,
+                help_text=d["description"],
+            )
+            if s != "None":
+                user_map[key] = s
+                if u:
+                    user_units[key] = u
 
-    # ------------------------------------------------------------------
-    # 5. AI Context Inputs
-    # ------------------------------------------------------------------
-    ai_inputs: dict = {}
-    for k, p in AI_CONTEXT_PROMPTS.items():
-        ai_inputs[k] = st.text_area(
-            p["label"],
-            value=defaults["ai_context"].get(k, ""),
-            help=p["help"],
-        )
+        # ------------------------------------------------------------------
+        # 3. Zones & Rooms
+        # ------------------------------------------------------------------
+        st.subheader("3. Zones & Rooms")
 
-    config_object = {
-        "profile_name": profile_name,
-        "created_at": datetime.now().isoformat(),
-        "mapping": user_map,
-        "units": user_units,
-        "ai_context": ai_inputs,
-        "rooms_per_zone": rooms_per_zone,
-        "therm_version": "2.0",
-    }
+        # Always define this so it exists when Step B runs
+        mapped_rooms_labels: dict = {}
+
+        # Step A: Map Room Sensors
+        with st.expander("Step A: Map Room Sensors", expanded=True):
+            r_cols = st.columns(2)
+            for i in range(1, 9):
+                r_key = f"{ROOM_SENSOR_PREFIX}{i}"
+                with r_cols[(i - 1) % 2]:
+                    r_s, _ = render_sensor_row(
+                        f"Room Sensor {i}",
+                        r_key,
+                        options,
+                        defaults,
+                        required=False,
+                        help_text=None,
+                    )
+                    if r_s != "None":
+                        user_map[r_key] = r_s
+                        mapped_rooms_labels[r_key] = r_s
+
+        # Step B: Configure Zones & Link Rooms
+        with st.expander("Step B: Configure Zones & Link Rooms", expanded=True):
+            rooms_per_zone: dict = {}
+
+            # Friendly labels for rooms: "Kitchen (Room_1)" etc.
+            friendly_room_options = {
+                k: f"{v} ({k})" for k, v in mapped_rooms_labels.items()
+            }
+            room_keys_list = list(friendly_room_options.keys())
+
+            for z_key, z_d in ZONE_SENSORS.items():
+                st.markdown(f"**{z_d['label']}**")
+
+                z_s, z_u = render_sensor_row(
+                    "Zone Pump/Valve (Binary)",
+                    z_key,
+                    options,
+                    defaults,
+                    required=False,
+                    help_text=z_d["description"],
+                )
+                if z_s != "None":
+                    user_map[z_key] = z_s
+                    if u:
+                        user_units[z_key] = z_u
+                else:
+                    # If zone unmapped, clear any lingering room links in session state
+                    if f"link_{z_key}" in st.session_state:
+                        st.session_state[f"link_{z_key}"] = []
+
+                saved_links = defaults.get("rooms_per_zone", {}).get(z_key, [])
+                valid_defaults = [r for r in saved_links if r in room_keys_list] if z_s != "None" else []
+
+                # Avoid Streamlit warning when default + session_state both set:
+                # only pass default if the key is not already in session_state.
+                multiselect_kwargs = {
+                    "format_func": lambda x: friendly_room_options[x],
+                    "key": f"link_{z_key}",
+                    "help": "Select which room sensors belong to this zone.",
+                }
+                if f"link_{z_key}" not in st.session_state:
+                    multiselect_kwargs["default"] = valid_defaults
+
+                selected_keys = st.multiselect(
+                    f"Select rooms controlled by {z_d['label']}:",
+                    options=room_keys_list,
+                    **multiselect_kwargs,
+                )
+                rooms_per_zone[z_key] = selected_keys
+
+                st.markdown("---")
+
+            # If a zone was unmapped (set to None), clear its room links to avoid stale associations
+            for z_key in list(rooms_per_zone.keys()):
+                if z_key not in user_map:
+                    rooms_per_zone[z_key] = []
+
+        # ------------------------------------------------------------------
+        # 4. Advanced / Environmental (alphabetical)
+        # ------------------------------------------------------------------
+        with st.expander("Advanced / Environmental"):
+            merged = {**OPTIONAL_SENSORS, **ENVIRONMENTAL_SENSORS}
+            for key, d in sorted(
+                merged.items(), key=lambda kv: kv[1].get("label", kv[0]).lower()
+            ):
+                s, u = render_sensor_row(
+                    d["label"],
+                    key,
+                    options,
+                    defaults,
+                    required=False,
+                    help_text=d.get("description", None),
+                )
+                if s != "None":
+                    user_map[key] = s
+                    if u:
+                        user_units[key] = u
+
+        st.divider()
+
+        # ------------------------------------------------------------------
+        # 5. AI Context Inputs
+        # ------------------------------------------------------------------
+        ai_inputs: dict = {}
+        for k, p in AI_CONTEXT_PROMPTS.items():
+            ai_inputs[k] = st.text_area(
+                p["label"],
+                value=defaults["ai_context"].get(k, ""),
+                help=p["help"],
+            )
+
+        config_object = {
+            "profile_name": profile_name,
+            "created_at": datetime.now().isoformat(),
+            "mapping": user_map,
+            "units": user_units,
+            "ai_context": ai_inputs,
+            "rooms_per_zone": rooms_per_zone,
+            "therm_version": "2.0",
+        }
+
     # ------------------------------------------------------------------
     # 6. Two-Step Actions: Save Configuration + Process Data (top bar)
     # ------------------------------------------------------------------
