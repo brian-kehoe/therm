@@ -225,6 +225,31 @@ SENSOR_ROLES = {
     'heat_pump_hot_water_temperature': 'core_periodic',
     'sensor.heat_pump_defrost_status': 'rare_event',
     'heat_pump_defrost_status': 'rare_event',
+
+    # Mapped/internal column names (used after schema mapping)
+    'Zone_1': 'binary_state',
+    'Zone_2': 'binary_state',
+    'Zone_3': 'binary_state',
+    'Zone_4': 'binary_state',
+    'Room_1': 'room_temp',
+    'Room_2': 'room_temp',
+    'Room_3': 'room_temp',
+    'Room_4': 'room_temp',
+    'Room_5': 'room_temp',
+    'Room_6': 'room_temp',
+    'Room_7': 'room_temp',
+    'Power': 'core_periodic',
+    'FlowTemp': 'core_periodic',
+    'ReturnTemp': 'core_periodic',
+    'FlowRate': 'core_periodic',
+    'OutdoorTemp': 'core_periodic',
+    'Freq': 'core_periodic',
+    'Indoor_Power': 'core_periodic',
+    'DHW_Temp': 'core_periodic',
+    'DHW_Active': 'binary_state',
+    'DHW_Mode': 'binary_state',
+    'ValveMode': 'binary_state',
+    'Defrost': 'rare_event',
 }
 
 # ==========================================
