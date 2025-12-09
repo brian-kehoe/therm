@@ -162,7 +162,15 @@ def smart_forward_fill(df_resampled, patterns):
         
         # Apply forward fill with limit
         df_filled[col] = df_filled[col].ffill(limit=limit_minutes)
-        
+
+        # For binary state sensors: backfill leading NaNs with 0 (default "off" state)
+        # These sensors report on state CHANGE - absence means default state
+        if pat and pat.get('report_type') in ('on_change', 'rare_event'):
+            # Only fill leading NaNs (before first real value)
+            first_valid_idx = df_filled[col].first_valid_index()
+            if first_valid_idx is not None:
+                df_filled.loc[:first_valid_idx, col] = df_filled[col].loc[:first_valid_idx].fillna(0)
+
     return df_filled
 
 def load_saved_heartbeat_baseline(json_path, current_month=None):
