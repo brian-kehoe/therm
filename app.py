@@ -75,8 +75,11 @@ st.markdown(
     /* Slightly reduced padding without clipping titles */
     .block-container { padding-top: 1.5rem !important; }
     [data-testid="stSidebar"] .block-container { padding-top: 0.75rem !important; }
-    /* Nudge sidebar logo upward a bit more */
+    /* Nudge sidebar header elements upward */
     [data-testid="stSidebar"] img { margin-top: -22px !important; }
+    [data-testid="stSidebar"] .element-container { margin-top: -22px !important; }
+    /* Pull the Data source & files box up */
+    [data-testid="stSidebar"] [data-testid="stExpander"] { margin-top: -10px !important; }
     </style>
     """,
     unsafe_allow_html=True,
