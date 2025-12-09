@@ -8,6 +8,11 @@ Core CSV loader for THERM.
 - Resamples to 1-minute cadence.
 - Applies user-config mapping.
 - Provides hooks for unified Modbus interpretation across HA + Grafana paths.
+
+HOTFIX v2.8.1: Split forward-fill limits for state vs numeric sensors
+- State sensors (zones, valves, modes): 240 minute limit
+- Numeric sensors (temps, power, flow): 60 minute limit
+- Fixes Zone_1 (underfloor pump) data loss for multi-hour activations
 """
 
 from typing import Any, Callable, Dict, Optional
@@ -220,7 +225,6 @@ def _coerce_numeric_sensors(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-
 # ----------------------------------------------------------------------
 # PUBLIC LOADER API
 # ----------------------------------------------------------------------
@@ -244,7 +248,7 @@ def load_and_clean_data(
         6) Apply mapping (simple column rename from config).
         7) Apply unified Modbus interpretation hook (currently NO-OP).
         8) Coerce sensor-like columns to numeric, preserve explicit text columns.
-        9) Fill small gaps with limited forward-fill and return the dataset.
+        9) Fill small gaps with sensor-type-aware forward-fill limits and return the dataset.
 
     Returns:
         dict with keys:
@@ -352,12 +356,17 @@ def load_and_clean_data(
     if progress_cb:
         progress_cb("Applying sensor mapping...", 0.8)
 
+    # Default: treat state columns as they come from df_state_wide
+    state_source_cols = set(df_state_wide.columns) if not df_state_wide.empty else set()
+
     if user_config and "mapping" in user_config:
-        # The config has {Friendly: Raw}; we need {Raw: Friendly}
         forward_map = user_config.get("mapping", {}) or {}
         if isinstance(forward_map, dict) and forward_map:
             reverse_map = {v: k for k, v in forward_map.items()}
             combined_df = combined_df.rename(columns=reverse_map)
+            
+            # Update state_source_cols to their mapped names
+            state_source_cols = {reverse_map.get(c, c) for c in state_source_cols}
 
     # 5b. Apply unified Modbus interpretation hook (currently NO-OP)
     # NOTE: When implementing, we may want to pass an explicit source_hint
@@ -368,10 +377,36 @@ def load_and_clean_data(
         source_hint=None,
     )
 
-    # 6. Final cleanup & small-gap filling
+    # ===================================================================
+    # 6. HOTFIX v2.8.1: Sensor-type-aware forward-fill
+    # ===================================================================
+    # PROBLEM: Generic ffill(limit=60) truncates multi-hour zone activations.
+    # Example: Underfloor pump runs 03:07→06:07 (180 mins) but gets clipped
+    # at 60 minutes, causing Zone_1 to show all zeros in the engine.
+    #
+    # SOLUTION: Split forward-fill limits by sensor type:
+    # - State sensors (zones, valves, modes) maintain state for hours → 240 min
+    # - Numeric sensors (temps, power, flow) should be conservative → 60 min
+    # ===================================================================
+    
     combined_df = combined_df.sort_index()
     combined_df = _coerce_numeric_sensors(combined_df)
-    combined_df = combined_df.ffill(limit=60)
+    
+    # Apply sensor-type-aware forward-fill
+    if not df_state_wide.empty:
+        state_cols = [c for c in combined_df.columns if c in state_source_cols]
+        numeric_cols = [c for c in combined_df.columns if c not in state_source_cols]
+        
+        # State sensors: binary sensors can stay "on" for 3+ hours
+        if state_cols:
+            combined_df[state_cols] = combined_df[state_cols].ffill(limit=240)
+        
+        # Numeric sensors: conservative limit to avoid inventing data
+        if numeric_cols:
+            combined_df[numeric_cols] = combined_df[numeric_cols].ffill(limit=60)
+    else:
+        # Fallback: if no state CSV present, use original uniform limit
+        combined_df = combined_df.ffill(limit=60)
 
     return {
         "df": combined_df,
