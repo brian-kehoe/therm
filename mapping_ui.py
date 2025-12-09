@@ -1,30 +1,123 @@
 # mapping_ui.py
-import streamlit as st
-import pandas as pd
+import csv
 import json
+import time
 from datetime import datetime
+
+import pandas as pd
+import streamlit as st
 from schema_defs import (
     REQUIRED_SENSORS, RECOMMENDED_SENSORS, OPTIONAL_SENSORS, 
     ZONE_SENSORS, ENVIRONMENTAL_SENSORS, AI_CONTEXT_PROMPTS, ROOM_SENSOR_PREFIX
 )
 import config_manager
 
+
+# -------------------------------------------------------------------
+# FAST ENTITY SCAN (streaming) TO AVOID LOADING HUGE HA FILES
+# -------------------------------------------------------------------
+def _quick_entity_scan(file_obj, max_rows: int = 50_000, max_entities: int = 200):
+    """
+    Extract unique entity_id values from a long-form HA CSV without loading it
+    fully. Stops early once a reasonable number of unique entities have been
+    found, and caps total rows scanned to keep the UI responsive even for
+    large history exports. We only need the first occurrence of each entity_id.
+    """
+    # Remember position so we can restore
+    try:
+        start_pos = file_obj.tell()
+    except Exception:
+        start_pos = None
+
+    entities: set[str] = set()
+    rows_seen = 0
+
+    try:
+        reader = csv.reader(file_obj)
+        header = next(reader, None)
+        if not header:
+            return []
+
+        # Locate entity_id column (case-insensitive)
+        try:
+            eid_idx = [h.lower() for h in header].index("entity_id")
+        except ValueError:
+            return []
+
+        for row in reader:
+            rows_seen += 1
+            if rows_seen > max_rows:
+                break
+            if eid_idx < len(row):
+                val = row[eid_idx].strip()
+                if val and val not in entities:
+                    entities.add(val)
+            if len(entities) >= max_entities:
+                break
+
+    except Exception:
+        return []
+    finally:
+        if start_pos is not None:
+            try:
+                file_obj.seek(start_pos)
+            except Exception:
+                pass
+
+    return sorted(entities)
+
+
 def get_all_unique_entities(uploaded_files):
+    """
+    Fast entity discovery with caching and timing debug info.
+    """
+    entity_cache = st.session_state.get("entity_cache", {})
+    debug_scans = []
     found_entities = set()
     for file_obj in uploaded_files:
         file_obj.seek(0)
+        sig = (getattr(file_obj, "name", None), getattr(file_obj, "size", None))
+
+        if sig in entity_cache:
+            found_entities.update(entity_cache[sig])
+            debug_scans.append({
+                "file": sig[0],
+                "cached": True,
+                "entities": len(entity_cache[sig]),
+                "secs": 0.0,
+            })
+            file_obj.seek(0)
+            continue
+
+        t0 = time.time()
         try:
             df_head = pd.read_csv(file_obj, nrows=2)
             if 'entity_id' in df_head.columns:
                 file_obj.seek(0)
-                df_ent = pd.read_csv(file_obj, usecols=['entity_id'])
-                found_entities.update(df_ent['entity_id'].dropna().unique())
+                ents = _quick_entity_scan(file_obj)
+                found_entities.update(ents)
+                entity_cache[sig] = ents
+                debug_scans.append({
+                    "file": sig[0],
+                    "cached": False,
+                    "entities": len(ents),
+                    "secs": time.time() - t0,
+                })
             else:
-                cols = [c for c in df_head.columns if c.lower() not in ['time', 'date', 'timestamp', 'last_changed', 'series']]
+                cols = [c for c in df_head.columns if c.lower() not in ['time', 'date', 'timestamp', 'last_changed', 'series', 'value']]
                 found_entities.update(cols)
+                entity_cache[sig] = cols
+                debug_scans.append({
+                    "file": sig[0],
+                    "cached": False,
+                    "entities": len(cols),
+                    "secs": time.time() - t0,
+                })
         except Exception:
             pass
         file_obj.seek(0)
+    st.session_state["entity_cache"] = entity_cache
+    st.session_state["entity_scan_debug"] = debug_scans
     return sorted(list(found_entities))
 
 def render_sensor_row(label, internal_key, options, defaults, required=False, help_text=None):
@@ -69,22 +162,6 @@ def render_sensor_row(label, internal_key, options, defaults, required=False, he
 def render_configuration_interface(uploaded_files):
     st.markdown("## ️ System Setup")
 
-    # Scan uploaded files to discover available sensors/entities.
-    # Always refresh when the set of uploaded files changes (name or size).
-    files_key = []
-    if uploaded_files:
-        files_key = sorted(
-            (getattr(f, "name", ""), getattr(f, "size", 0)) for f in uploaded_files
-        )
-
-    if (
-        "available_sensors" not in st.session_state
-        or st.session_state.get("available_sensors_files_key") != files_key
-    ):
-        with st.spinner("Scanning files..."):
-            st.session_state["available_sensors"] = get_all_unique_entities(uploaded_files)
-            st.session_state["available_sensors_files_key"] = files_key
-
     col_load, col_name = st.columns([1, 2])
 
     # Defaults that can be overridden by a loaded profile
@@ -96,10 +173,14 @@ def render_configuration_interface(uploaded_files):
         "rooms_per_zone": {},
     }
 
+    # Cached entity list (may be empty if skipping scan)
+    available_entities = st.session_state.get("available_sensors", []) or []
+
     # --- Load Profile (JSON) ---
     with col_load:
         uploaded_config = st.file_uploader(" Load Profile", type="json", key="cfg_up")
         if uploaded_config:
+            t_profile = time.time()
             try:
                 loaded = json.load(uploaded_config)
                 defaults.update(loaded)
@@ -138,16 +219,29 @@ def render_configuration_interface(uploaded_files):
                 st.error("Failed to load profile JSON.")
 
 
-    # Build options list:
-    #   - All entities found in the currently uploaded files
-    #   - PLUS any entities from the loaded profile mapping (even if not in this upload)
-    base_entities = st.session_state.get("available_sensors", []) or []
-    extra_from_profile = []
-    for v in (defaults.get("mapping") or {}).values():
-        if v and v not in base_entities:
-            extra_from_profile.append(v)
+    # Manual refresh button for entity discovery (skips auto-scan on profile load)
+    if uploaded_files:
+        with st.expander("Entity Discovery", expanded=False):
+            files_key = sorted(
+                (getattr(f, "name", ""), getattr(f, "size", 0)) for f in uploaded_files
+            )
+            if st.button("Refresh entities from uploaded files", type="secondary"):
+                t_scan = time.time()
+                st.session_state["available_sensors"] = get_all_unique_entities(uploaded_files)
+                st.session_state["available_sensors_files_key"] = files_key
+                st.success(f"Entities refreshed in {time.time()-t_scan:.3f}s")
+            # Show cached results if present
+            cached_entities = st.session_state.get("available_sensors", [])
+            if cached_entities:
+                st.caption(f"{len(cached_entities)} entities cached.")
+            else:
+                st.caption("Entities will be loaded from profile mapping unless refreshed.")
 
-    combined_entities = base_entities + sorted(set(extra_from_profile))
+    # Build options list:
+    #   - Entities from the loaded profile mapping
+    #   - PLUS any entities discovered/cached from files (if refreshed)
+    profile_entities = list((defaults.get("mapping") or {}).values())
+    combined_entities = sorted(set(profile_entities + available_entities))
     options = ["None"] + combined_entities
 
     # --- Profile name ---
