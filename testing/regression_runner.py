@@ -19,6 +19,7 @@ import data_loader
 import processing
 from view_runs import _get_friendly_name
 from schema_defs import ROOM_SENSOR_PREFIX, ZONE_SENSOR_PREFIX
+from utils import strip_entity_prefix
 
 
 # -------------------------------
@@ -164,8 +165,20 @@ def _extract_ui_labels_all_modes(
     profile: Dict[str, Any],
 ) -> Dict[str, Any]:
 
+    def _normalize_labels(labels: List[str]) -> List[str]:
+        """Strip HA/Grafana prefixes and keep order without duplicates."""
+        seen = set()
+        cleaned: List[str] = []
+        for label in labels:
+            nice = strip_entity_prefix(str(label))
+            if nice not in seen:
+                cleaned.append(nice)
+                seen.add(nice)
+        return cleaned
+
     # -------- Long-Term Trends --------
-    long_term_trends = daily_df.columns.tolist() if daily_df is not None else []
+    long_term_trends_raw = daily_df.columns.tolist() if daily_df is not None else []
+    long_term_trends = _normalize_labels(long_term_trends_raw)
 
     # -------- Run Inspector: Select Run Dropdown --------
     select_run_dropdown = []
@@ -197,10 +210,12 @@ def _extract_ui_labels_all_modes(
             zones.append(_get_friendly_name(k, profile))
 
     # -------- Data Quality Audit --------
-    data_quality_audit = sorted(df.columns)
+    data_quality_audit_raw = sorted(df.columns)
+    data_quality_audit = _normalize_labels(data_quality_audit_raw)
 
     return {
         "long_term_trends": long_term_trends,
+        "long_term_trends_raw": long_term_trends_raw,
         "run_inspector": {
             "select_run_dropdown": select_run_dropdown,
             "core_metrics": core_metrics,
@@ -209,6 +224,7 @@ def _extract_ui_labels_all_modes(
             "zones": zones,
         },
         "data_quality_audit": data_quality_audit,
+        "data_quality_audit_raw": data_quality_audit_raw,
     }
 
 

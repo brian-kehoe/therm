@@ -18,7 +18,10 @@ THRESHOLDS = {
     "flow_over_43c_pct_high": 20,
     "dhw_scop_low": 2.2,
     "night_share_elec_low": 0.30,
-    "ghost_power_threshold": 120    # W - Indoor Power level indicating zone pumps active
+    "ghost_power_threshold": 120,    # W - Indoor Power level indicating zone pumps active
+    # Run detection guards
+    "min_heating_run_minutes_with_no_zones": 8,
+    "min_heating_run_heat_kwh_with_no_zones": 0.25,
 }
 
 NIGHT_HOURS = [2, 3, 4, 5]

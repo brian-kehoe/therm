@@ -11,7 +11,7 @@ from config import (
     SENSOR_ROLES,
     BASELINE_JSON_PATH,
 )
-from utils import availability_pct
+from utils import availability_pct, strip_entity_prefix
 import baselines
 
 
@@ -288,23 +288,20 @@ def render_data_quality(
             return name in mapped_keys
 
         def display_label_for(internal_name: str) -> str:
-                """
-                What the user sees on the front end.
+            """
+            What the user sees on the front end.
 
-                - Zones & Rooms: always show the mapped sensor name (entity_id).
-                - Standard core sensors: show FRIENDLY labels (Outdoor Power, Flow Temp, etc.).
-                - Everything else: mapped entity_id, or internal name if unmapped.
-                """
-                # Zones and Rooms → display the individual mapped sensor names
-                if internal_name.startswith("Zone_") or internal_name.startswith("Room_"):
-                    return str(mapping.get(internal_name, internal_name))
+            - Zones & Rooms: show the mapped sensor name (entity_id) with prefixes stripped.
+            - Standard core sensors: show FRIENDLY labels (Outdoor Power, Flow Temp, etc.).
+            - Everything else: mapped entity_id (prefix-stripped), or internal name if unmapped.
+            """
+            if internal_name.startswith("Zone_") or internal_name.startswith("Room_"):
+                return strip_entity_prefix(str(mapping.get(internal_name, internal_name)))
 
-                # Core standardised signals → friendly label
-                if internal_name in STANDARD_LABELS:
-                    return STANDARD_LABELS[internal_name]
+            if internal_name in STANDARD_LABELS:
+                return STANDARD_LABELS[internal_name]
 
-                # Default → mapped entity id (or internal name)
-                return str(mapping.get(internal_name, internal_name))
+            return strip_entity_prefix(str(mapping.get(internal_name, internal_name)))
 
 
         def tooltip_label_for(internal_name: str) -> str:

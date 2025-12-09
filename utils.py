@@ -3,7 +3,15 @@ import pandas as pd
 import numpy as np
 
 # Explicit exports
-__all__ = ["safe_div", "availability_pct", "expected_window_for_sparse_sensor", "_log_warn", "_log_error", "_log_info"]
+__all__ = [
+    "safe_div",
+    "availability_pct",
+    "expected_window_for_sparse_sensor",
+    "_log_warn",
+    "_log_error",
+    "_log_info",
+    "strip_entity_prefix",
+]
 
 # Lightweight logging helpers
 LOG_VERBOSE = True
@@ -53,3 +61,18 @@ def expected_window_for_sparse_sensor(sensor_name: str, baseline_dict: dict, fal
     if baseline_dict and baseline_dict.get('expected_minutes'):
         return float(baseline_dict['expected_minutes'])
     return fallback_hours
+
+
+def strip_entity_prefix(entity_id: str) -> str:
+    """
+    Remove common Home Assistant / IoT prefixes so UI labels stay clean and
+    consistent between HA and Grafana inputs.
+    """
+    if not isinstance(entity_id, str):
+        return str(entity_id)
+
+    prefixes = ("binary_sensor.", "sensor.", "switch.")
+    for p in prefixes:
+        if entity_id.startswith(p):
+            return entity_id[len(p):]
+    return entity_id

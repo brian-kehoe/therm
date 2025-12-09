@@ -14,7 +14,7 @@ from config import (
     TARIFF_PROFILE_ID,
     CONFIG_HISTORY,
 )
-from utils import safe_div
+from utils import safe_div, strip_entity_prefix
 
 
 def _get_friendly_name(internal_key: str, user_config: dict) -> str:
@@ -39,17 +39,10 @@ def _get_friendly_name(internal_key: str, user_config: dict) -> str:
     mapping = user_config.get("mapping", {})
     if not isinstance(mapping, dict):
         return str(internal_key)
-    
-    # Get the mapped entity_id
+
+    # Get the mapped entity_id and strip HA/Grafana prefixes for display
     entity_id = str(mapping.get(internal_key, internal_key))
-    
-    # Strip common Home Assistant prefixes for cleaner display
-    if entity_id.startswith("binary_sensor."):
-        return entity_id.replace("binary_sensor.", "", 1)
-    elif entity_id.startswith("sensor."):
-        return entity_id.replace("sensor.", "", 1)
-    
-    return entity_id
+    return strip_entity_prefix(entity_id)
 
 
 def _get_rooms_per_zone_config(user_config: dict) -> dict:
@@ -108,19 +101,19 @@ def render_run_inspector(df, runs_list):
             icon = "🔥"
 
         zone_raw = r.get("active_zones", r.get("dominant_zones", "None"))
-        if r["run_type"] == "DHW" and not r.get(
-            "heating_during_dhw_detected", False
-        ):
-            zone_label = "No Zone Data"
-        else:
-            zone_label = (
-                zone_raw if zone_raw and zone_raw.lower() != "none" else "No Zone Data"
-            )
 
-        label = (
-            f"{start_str} | {r['duration_mins']}m | {icon} "
-            f"{r['run_type']} ({zone_label})"
-        )
+        # For DHW runs, hide zone info unless heating/ghost pumping was detected.
+        show_zone = r["run_type"] != "DHW" or r.get("heating_during_dhw_detected") or r.get("ghost_pumping_power_detected")
+        if show_zone:
+            zone_label = (
+                zone_raw if zone_raw and str(zone_raw).lower() != "none" else "No Zone Data"
+            )
+        else:
+            zone_label = ""
+
+        label = f"{start_str} | {r['duration_mins']}m | {icon} {r['run_type']}"
+        if zone_label:
+            label = f"{label} ({zone_label})"
         run_options[label] = r
 
     option_labels = list(run_options.keys())

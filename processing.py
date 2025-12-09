@@ -11,7 +11,7 @@ from config import (
     NIGHT_HOURS,
     TARIFF_STRUCTURE,
 )
-from utils import safe_div
+from utils import safe_div, strip_entity_prefix
 
 
 # --- DYNAMIC HELPERS ---------------------------------------------------------
@@ -43,14 +43,8 @@ def get_friendly_name(internal_key, user_config) -> str:
 
     val = mapping.get(internal_key, internal_key)
     entity_id = str(val)
-    
-    # Strip common Home Assistant prefixes for cleaner display
-    if entity_id.startswith("binary_sensor."):
-        return entity_id.replace("binary_sensor.", "", 1)
-    elif entity_id.startswith("sensor."):
-        return entity_id.replace("sensor.", "", 1)
-    
-    return entity_id
+
+    return strip_entity_prefix(entity_id)
 
 
 def calculate_physics_metrics(df: pd.DataFrame) -> pd.DataFrame:
@@ -629,6 +623,14 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
 
     df = df.copy()
 
+    min_run_duration = THRESHOLDS.get("minimum_run_duration_min", 5)
+    min_unzoned_run_duration = THRESHOLDS.get(
+        "min_heating_run_minutes_with_no_zones", max(min_run_duration, 8)
+    )
+    min_unzoned_heat_kwh = THRESHOLDS.get(
+        "min_heating_run_heat_kwh_with_no_zones", 0.25
+    )
+
     df["run_change"] = (
         (df["is_active"].diff().ne(0))
         | (df["is_DHW"].ne(df["is_DHW"].shift()))
@@ -642,7 +644,7 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
     room_cols = get_room_columns(df)
 
     for run_id, group in active_groups:
-        if len(group) < 5:
+        if len(group) < min_run_duration:
             continue
 
         # Majority-based DHW classification instead of "any is_DHW"
@@ -725,12 +727,26 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 friendly_r = get_friendly_name(r, user_config)
                 room_deltas[friendly_r] = round(end_t - start_t, 2)
 
+        duration_mins = len(group)
+
+        # Filter out zone-less, tiny heating blips (often noise from Grafana ingest)
+        if (
+            run_type == "Heating"
+            and zone_cols
+            and not active_zones_list
+            and (
+                duration_mins < min_unzoned_run_duration
+                or heat_kwh < min_unzoned_heat_kwh
+            )
+        ):
+            continue
+
         runs.append(
             {
                 "id": int(run_id),
                 "start": group.index[0],
                 "end": group.index[-1],
-                "duration_mins": len(group),
+                "duration_mins": duration_mins,
                 "run_type": run_type,
                 "avg_outdoor": round(avg_outdoor, 1),
                 "avg_flow_temp": round(avg_flow, 1),
