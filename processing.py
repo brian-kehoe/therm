@@ -422,6 +422,11 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
 
     # 2. Activity
     power_min = thresholds.get("power_min", 50)
+    if "Power" not in d.columns:
+        raise KeyError(
+            "Power column missing after mapping. Please ensure the Power role "
+            "is mapped to a valid entity in System Setup."
+        )
     d["is_active"] = (d["Power"] > power_min).astype(int)
 
     # 3. Detect DHW Mode (Valve-first, Status-second, DHW_Mode not used for detection)
