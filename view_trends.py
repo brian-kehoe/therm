@@ -49,7 +49,7 @@ def render_long_term_trends(daily_df: pd.DataFrame, raw_df: pd.DataFrame, runs_l
 
         k1.metric("Days", len(daily_df))
         k2.metric("Total Heat", f"{total_heat:.0f} kWh")
-        k3.metric("Total Cost", f"€{total_cost:.2f}")
+        k3.metric("Total Cost", f"{currency}{total_cost:.2f}")
         k4.metric("Period SCOP", f"{scop:.2f}")
 
         # 2. Daily Energy (Stacked)
