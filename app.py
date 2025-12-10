@@ -136,6 +136,9 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
+with st.sidebar.expander("About therm", expanded=False):
+    st.markdown("**therm (beta) - Heat Pump Performance Analysis**")
+
 with st.sidebar.expander("Data source & files", expanded=in_system_setup):
     _log("sidebar_upload_start")
     # Use a versioned key so we can hard-reset the uploader
