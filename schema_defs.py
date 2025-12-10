@@ -198,11 +198,6 @@ AI_CONTEXT_PROMPTS = {
         "placeholder": "e.g., Samsung Gen 6, Daikin Altherma 3...",
         "help": "Helps the AI identify model-specific quirks (e.g., defrost behavior)."
     },
-    "tariff_structure": {
-        "label": "Tariff / Cost Structure",
-        "placeholder": "e.g., Night rate 2am-5am @ 0.08, Day @ 0.35...",
-        "help": "Used to calculate cost efficiency accurately."
-    },
     "property_context": {
         "label": "Property Context",
         "placeholder": "e.g., 1990s detached, underfloor heating downstairs...",
