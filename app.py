@@ -515,12 +515,17 @@ if uploaded_files:
                     total_elec = stats["total_elec_kwh"]
                     global_cop = stats["global_cop"]
 
-                    runs_detected = len(data.get("runs") or [])
+                    runs_list = data.get("runs") or []
+                    runs_detected = len(runs_list)
+                    heating_runs = sum(1 for r in runs_list if r.get("run_type") == "Heating")
+                    dhw_runs = sum(1 for r in runs_list if r.get("run_type") == "DHW")
                 else:
                     mode = None
                     st.info("Upload data and configure your system to begin analysis.")
                     total_heat = total_elec = global_cop = 0.0
                     runs_detected = 0
+                    heating_runs = 0
+                    dhw_runs = 0
 
                 # --- Global Stats (GREEN BLOCK ONLY, shared between LT Trends + Run Inspector) ---
                 if data and mode in ("Long-Term Trends", "Run Inspector"):
@@ -528,6 +533,10 @@ if uploaded_files:
 
                     # Runs Detected as headline
                     st.metric("Runs Detected", f"{runs_detected}")
+                    st.markdown(
+                        f"<div style='margin-top:-25px; font-size:12px; color:#5c5c5c;'>Heating: {heating_runs} runs | DHW: {dhw_runs} runs</div>",
+                        unsafe_allow_html=True,
+                    )
 
                     # Detailed stats
                     st.metric("Total Heat Output", f"{total_heat:.1f} kWh")
