@@ -268,59 +268,48 @@ def render_run_inspector(df, runs_list):
                 st.divider()
 
         is_dhw = selected_run["run_type"] == "DHW"
-        num_rows = 4 if is_dhw else 3
-        row_titles = ["Delta T", "Flow Rate", "Active Zones"]
-        if is_dhw:
-            row_titles.append("Hot Water / Return Temps")
-
-        chart_height = 650 if is_dhw else 500
-
-        fig2 = make_subplots(
-            rows=num_rows,
-            cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.08,
-            subplot_titles=row_titles,
-            specs=[[{"secondary_y": False}]] * num_rows,
-        )
-
-        # ΔT
+        # ΔT chart (own legend)
         if "DeltaT" in run_data.columns:
-            fig2.add_trace(
+            fig_dt = go.Figure()
+            fig_dt.add_trace(
                 go.Scatter(
                     x=run_data.index,
                     y=run_data["DeltaT"],
                     name="ΔT",
                     line=dict(color="green"),
-                ),
-                row=1,
-                col=1,
+                )
             )
-            fig2.add_hline(
-                y=5.0,
-                line_dash="dash",
-                line_color="red",
-                row=1,
-                col=1,
+            fig_dt.add_hline(y=5.0, line_dash="dash", line_color="red")
+            fig_dt.update_layout(
+                title="Delta T",
+                margin=dict(l=10, r=10, t=30, b=10),
+                height=200,
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             )
+            st.plotly_chart(fig_dt, use_container_width=True, key="run_hydro_dt")
 
-        # Flow Rate
+        # Flow Rate chart (own legend)
         if "FlowRate" in run_data.columns:
-            fig2.add_trace(
+            fig_flow = go.Figure()
+            fig_flow.add_trace(
                 go.Scatter(
                     x=run_data.index,
                     y=run_data["FlowRate"],
                     name="Flow",
                     line=dict(color="cyan"),
-                ),
-                row=2,
-                col=1,
+                )
             )
+            fig_flow.update_layout(
+                title="Flow Rate",
+                margin=dict(l=10, r=10, t=30, b=10),
+                height=200,
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_flow, use_container_width=True, key="run_hydro_flow")
 
-        # ================================================================
-        #   FIXED: DYNAMIC ZONE LABELS WITH USER MAPPING
-        #   Hide entirely if no zones mapped
-        # ================================================================
+        # Active Zones chart (own legend)
         zone_cols = [
             c for c in run_data.columns 
             if c.startswith("Zone_") and c != "Zone_Config"
@@ -328,32 +317,26 @@ def render_run_inspector(df, runs_list):
         has_dhw = "DHW_Active" in run_data.columns
 
         if zone_cols:
+            fig_zones = go.Figure()
+
             # Build friendly zone labels from user mapping
             zone_labels = {}
-            
-            # DHW label
             if has_dhw:
                 zone_labels["DHW_Active"] = "Hot Water"
-            
-            # Zone labels from user mapping (e.g., "binary_sensor.underfloor_pump")
             for z in zone_cols:
                 zone_labels[z] = _get_friendly_name(z, user_config)
 
-            # Order: DHW (if present) first, then sorted zones
             ordered_keys = []
             if has_dhw:
                 ordered_keys.append("DHW_Active")
             ordered_keys.extend(sorted(zone_cols))
-
-            # Add thick zone bars
             zone_offsets = {key: idx for idx, key in enumerate(ordered_keys)}
 
             for key in ordered_keys:
                 if key not in run_data.columns:
                     continue
                 base_y = zone_offsets[key]
-                
-                # Convert zone values to numeric (handles HA string values like "on"/"off")
+
                 def _zone_active(val):
                     """Check if zone is active, handling both numeric and string values."""
                     if pd.isna(val):
@@ -367,9 +350,9 @@ def render_run_inspector(df, runs_list):
                         return base_y + 0.8 if is_active else None
                     except:
                         return None
-                
+
                 y_vals = run_data[key].apply(_zone_active)
-                fig2.add_trace(
+                fig_zones.add_trace(
                     go.Scatter(
                         x=run_data.index,
                         y=y_vals,
@@ -377,58 +360,54 @@ def render_run_inspector(df, runs_list):
                         mode="lines",
                         line=dict(width=15),
                         connectgaps=False,
-                    ),
-                    row=3,
-                    col=1,
+                    )
                 )
 
-            # Y-axis labels for zones
             y_tick_vals = [zone_offsets[key] + 0.4 for key in ordered_keys]
             y_tick_labels = [zone_labels[key] for key in ordered_keys]
-            
-            fig2.update_yaxes(
+            fig_zones.update_yaxes(
                 tickvals=y_tick_vals,
                 ticktext=y_tick_labels,
                 range=[0, len(ordered_keys)],
-                row=3,
-                col=1,
             )
-        else:
-            # If no zones mapped, hide the zones row
-            fig2.update_yaxes(visible=False, row=3, col=1)
-            fig2.update_xaxes(visible=False, row=3, col=1)
+            fig_zones.update_layout(
+                title="Active Zones",
+                margin=dict(l=10, r=10, t=30, b=10),
+                height=max(220, 140 + 20 * len(ordered_keys)),
+                hovermode="x unified",
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_zones, use_container_width=True, key="run_hydro_zones")
 
-        # DHW / Return temps
-        if is_dhw:
+        # DHW / Return temps chart (own legend)
+        if is_dhw and ("DHW_Temp" in run_data.columns or "ReturnTemp" in run_data.columns):
+            fig_temp = go.Figure()
             if "DHW_Temp" in run_data.columns:
-                fig2.add_trace(
+                fig_temp.add_trace(
                     go.Scatter(
                         x=run_data.index,
                         y=run_data["DHW_Temp"],
                         name="DHW Tank",
                         line=dict(color="orange", width=2),
-                    ),
-                    row=4,
-                    col=1,
+                    )
                 )
             if "ReturnTemp" in run_data.columns:
-                fig2.add_trace(
+                fig_temp.add_trace(
                     go.Scatter(
                         x=run_data.index,
                         y=run_data["ReturnTemp"],
                         name="Return",
                         line=dict(color="grey", width=1, dash="dot"),
-                    ),
-                    row=4,
-                    col=1,
+                    )
                 )
-
-        fig2.update_layout(
-            margin=dict(l=10, r=10, t=30, b=10),
-            height=chart_height,
-            hovermode="x unified",
-        )
-        st.plotly_chart(fig2, width="stretch", key="run_hydro_chart")
+            fig_temp.update_layout(
+                title="Hot Water / Return Temps",
+                margin=dict(l=10, r=10, t=30, b=10),
+                height=220,
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_temp, use_container_width=True, key="run_hydro_temps")
 
     # ------------------------------------------------------------------
     # TAB 3: Rooms
