@@ -572,9 +572,9 @@ def render_configuration_interface(uploaded_files):
                     rooms_per_zone[z_key] = []
 
         # ------------------------------------------------------------------
-        # 4. Advanced / Environmental (alphabetical)
+        # 4. Advanced / Environmental Sensors (alphabetical)
         # ------------------------------------------------------------------
-        with st.expander("Advanced / Environmental"):
+        with st.expander("Advanced / Environmental Sensors"):
             merged = {**OPTIONAL_SENSORS, **ENVIRONMENTAL_SENSORS}
             for key, d in sorted(
                 merged.items(), key=lambda kv: kv[1].get("label", kv[0]).lower()
