@@ -8,8 +8,38 @@ from datetime import datetime, timezone
 import json
 import pandas as pd
 
-from config import CALC_VERSION, AI_SYSTEM_CONTEXT
+from config import CALC_VERSION
 from utils import safe_div
+
+
+def _build_system_context(user_config: dict | None, include_heating_note: bool) -> str:
+    """Compose AI system context from user-provided freetext; add DHW note only if detected."""
+    parts: list[str] = []
+    if isinstance(user_config, dict):
+        ai_ctx = user_config.get("ai_context") or {}
+        for key in ("hp_model", "property_context", "operational_goals"):
+            val = ai_ctx.get(key)
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+        tariff = user_config.get("tariff_structure")
+        currency = user_config.get("currency", "€")
+        if isinstance(tariff, dict):
+            day = tariff.get("day_rate")
+            night = tariff.get("night_rate", day)
+            parts.append(f"Tariff: day/night rates {currency}{day} / {currency}{night}.")
+        elif isinstance(tariff, list) and tariff:
+            rules = tariff[0].get("rules", [])
+            if rules:
+                summary = "; ".join(
+                    f"{r.get('name','')}: {r.get('start','')}-{r.get('end','')} @ {currency}{r.get('rate','')}"
+                    for r in rules
+                )
+                parts.append(f"Tariff bands: {summary}")
+    if include_heating_note:
+        parts.append(
+            "Heating during DHW detected: zone pumps active during DHW can cause return mixing and low COP; attribute DHW efficiency penalties accordingly."
+        )
+    return "\n".join(parts) if parts else "No additional system context supplied."
 
 
 def render_long_term_trends(daily_df: pd.DataFrame, raw_df: pd.DataFrame, runs_list: list, user_config: dict | None = None) -> None:
@@ -409,13 +439,17 @@ def render_long_term_trends(daily_df: pd.DataFrame, raw_df: pd.DataFrame, runs_l
             "period_scop": round(float(scop), 2),
         }
 
+        include_heating_note = any(
+            bool(r.get("heating_during_dhw_detected")) for r in runs_list or []
+        )
+
         ai_payload = {
             "meta": {
                 "report_type": "LONG_TERM_TRENDS",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "calc_version": CALC_VERSION,
             },
-            "system_context": AI_SYSTEM_CONTEXT,
+            "system_context": _build_system_context(user_config, include_heating_note),
             "period_summary": period_summary,
             "daily_metrics": json_ready.to_dict(orient="records"),
         }

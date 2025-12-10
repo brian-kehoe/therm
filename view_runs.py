@@ -22,8 +22,6 @@ from config import (
 
     CALC_VERSION,
 
-    AI_SYSTEM_CONTEXT,
-
     TARIFF_PROFILE_ID,
 
     CONFIG_HISTORY,
@@ -37,6 +35,38 @@ from utils import safe_div, strip_entity_prefix
 
 
 
+
+
+
+def _build_system_context(user_config: dict | None, include_heating_note: bool) -> str:
+    """Compose AI context from user-provided freetext; add DHW heating note only if detected."""
+    parts: list[str] = []
+    if isinstance(user_config, dict):
+        ai_ctx = user_config.get("ai_context") or {}
+        for key in ("hp_model", "property_context", "operational_goals"):
+            val = ai_ctx.get(key)
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+        tariff = user_config.get("tariff_structure")
+        currency = user_config.get("currency", "?")
+        if isinstance(tariff, dict):
+            day = tariff.get("day_rate")
+            night = tariff.get("night_rate", day)
+            parts.append(f"Tariff: day/night rates {currency}{day} / {currency}{night}.")
+        elif isinstance(tariff, list) and tariff:
+            rules = tariff[0].get("rules", [])
+            if rules:
+                summary = "; ".join(
+                    f"{r.get('name','')}: {r.get('start','')}-{r.get('end','')} @ {currency}{r.get('rate','')}"
+                    for r in rules
+                )
+                parts.append(f"Tariff bands: {summary}")
+    if include_heating_note:
+        parts.append(
+            "Heating during DHW detected: zone pumps active during DHW can cause return mixing and low COP; attribute DHW efficiency penalties accordingly."
+        )
+    return "
+".join(parts) if parts else "No additional system context supplied."
 
 def _get_friendly_name(internal_key: str, user_config: dict) -> str:
 
@@ -1148,7 +1178,9 @@ def render_run_inspector(df, runs_list):
 
             },
 
-            "system_context": AI_SYSTEM_CONTEXT.strip(),
+            "system_context": _build_system_context(
+                user_config, bool(selected_run.get("heating_during_dhw_detected"))
+            ),
 
             "configuration_state": {
 
