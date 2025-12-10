@@ -250,11 +250,16 @@ def get_processed_data(files, user_config):
     #    runs don't collide in the cache)
     # ------------------------------------------------------------------
     files_key = tuple(sorted((f.name, f.size) for f in files))
-    config_key = str(user_config)
+    # Use a stable, name-sensitive cache key. json.dumps with sort_keys ensures we
+    # don't accidentally reuse a cache entry when the profile name changes.
+    import json as _json
+
+    config_key = _json.dumps(user_config, sort_keys=True, default=str)
     combined_key = (files_key, config_key, dataset_source)
 
     if "cached" in st.session_state:
-        if st.session_state["cached"].get("key") == combined_key:
+        cached = st.session_state["cached"]
+        if cached.get("key") == combined_key and cached.get("profile_name") == user_config.get("profile_name"):
             return st.session_state["cached"]
 
     status_container = st.status("Processing Data...", expanded=True)
@@ -353,6 +358,8 @@ def get_processed_data(files, user_config):
             "patterns": patterns,
             # keep pre-physics merged dataframe for deep debugging
             "raw_history": raw_history,
+            # guard against stale profile names being reused
+            "profile_name": user_config.get("profile_name") if isinstance(user_config, dict) else None,
         }
         st.session_state["cached"] = cache
         st.session_state["heartbeat_baseline"] = baselines
