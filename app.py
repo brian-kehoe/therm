@@ -627,7 +627,7 @@ if uploaded_files:
                     # Toggle for engine-level debug traces in processing.py
                     debug_flag = st.checkbox(
                         "Enable engine debug traces (JSON only)",
-                        value=st.session_state.get("debug_engine", True),  # default ON
+                        value=st.session_state.get("debug_engine", False),  # default OFF
                     )
                     st.session_state["debug_engine"] = debug_flag
 
