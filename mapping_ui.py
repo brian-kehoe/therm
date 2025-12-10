@@ -296,14 +296,16 @@ def render_configuration_interface(uploaded_files):
 
     # Defaults that can be overridden by a loaded profile
     defaults = {
+        "profile_name": "My Heat Pump",
         "mapping": {},
         "units": {},
         "ai_context": {},
-        "profile_name": "My Heat Pump",
+        "config_history": [],
         "rooms_per_zone": {},
         "thresholds": {},
         "physics_thresholds": {},
-        "tariff_structure": config.TARIFF_STRUCTURE,
+        # Default to empty; UI will infer 'Flat' mode and provide a default rate.
+        "tariff_structure": [],
         "currency": "€",
     }
 
@@ -435,6 +437,9 @@ def render_configuration_interface(uploaded_files):
 
                         # 4. Sync profile name when loading a new/different profile
                         st.session_state["profile_name_input"] = defaults["profile_name"]
+
+                        # 5. Sync config history from the loaded profile
+                        st.session_state["config_history"] = list(defaults.get("config_history") or [])
 
                     _log(f"profile_apply_defaults secs={time.time()-t_profile:.3f}")
                     profile_loaded = True
@@ -878,7 +883,7 @@ def render_configuration_interface(uploaded_files):
         # ------------------------------------------------------------------
         # 6. Tariff / Cost Structure
         # ------------------------------------------------------------------
-        tariff_structure_cfg = defaults.get("tariff_structure", config.TARIFF_STRUCTURE)
+        tariff_structure_cfg = defaults.get("tariff_structure", [])
         currency_default = defaults.get("currency", "€")
         currency_options = ["€", "£", "$"]
         currency = st.selectbox(
@@ -890,57 +895,80 @@ def render_configuration_interface(uploaded_files):
 
         # Determine default mode
         def _infer_mode(ts):
-            if isinstance(ts, dict):
-                return "Day/Night" if "day_rate" in ts or "night_rate" in ts else "Flat"
             if isinstance(ts, list) and ts:
                 return "Custom bands"
+            if isinstance(ts, dict):
+                day_rate = ts.get("day_rate")
+                # If night_rate is missing, it defaults to day_rate for comparison
+                night_rate = ts.get("night_rate", day_rate)
+
+                # If rates are equal and at least one is defined, it's Flat.
+                if day_rate is not None and day_rate == night_rate:
+                    return "Flat"
+
+                # If rates differ, or only one is defined, it's Day/Night.
+                if day_rate is not None or ts.get("night_rate") is not None:
+                    return "Day/Night"
+
+            # Default for empty structures or non-dict/list types
             return "Flat"
 
         tariff_mode_default = _infer_mode(tariff_structure_cfg)
-        # Keep UI aligned with loaded profile; allow in-session edits
         ts_signature = json.dumps(tariff_structure_cfg, sort_keys=True, default=str)
-        current_mode = st.session_state.get("tariff_mode", tariff_mode_default)
+
+        # If the loaded profile's tariff is different, reset the UI state.
         if st.session_state.get("tariff_mode_signature") != ts_signature:
-            current_mode = tariff_mode_default
-        if current_mode not in ["Flat", "Day/Night", "Custom bands"]:
-            current_mode = tariff_mode_default
+            st.session_state["tariff_mode"] = tariff_mode_default
+            # Also update the values for the input widgets from the loaded profile
+            if isinstance(tariff_structure_cfg, dict):
+                st.session_state["flat_rate_input"] = float(tariff_structure_cfg.get("day_rate", 0.33))
+                st.session_state["day_rate_input"] = float(tariff_structure_cfg.get("day_rate", 0.33))
+                st.session_state["night_rate_input"] = float(tariff_structure_cfg.get("night_rate", 0.15))
+                st.session_state["night_start_input"] = tariff_structure_cfg.get("night_start", "00:00")
+                st.session_state["night_end_input"] = tariff_structure_cfg.get("night_end", "07:00")
+            else:
+                # Reset to app defaults if the loaded profile has no dict-based tariff
+                st.session_state["flat_rate_input"] = 0.33
+                st.session_state["day_rate_input"] = 0.33
+                st.session_state["night_rate_input"] = 0.15
+                st.session_state["night_start_input"] = "00:00"
+                st.session_state["night_end_input"] = "07:00"
+
+        # The radio button now reads from the (now correct) session state
         tariff_mode = st.radio(
             "Tariff / Cost Structure",
             options=["Flat", "Day/Night", "Custom bands"],
-            index=["Flat", "Day/Night", "Custom bands"].index(current_mode),
             key="tariff_mode",
             help="Define how electricity cost varies over time.",
         )
         st.session_state["tariff_mode_signature"] = ts_signature
 
         if tariff_mode == "Flat":
+            # Ensure key exists on first run, then render widget.
+            # The widget will use the value from session_state.
+            st.session_state.setdefault("flat_rate_input", 0.33)
             flat_rate = st.number_input(
                 f"Flat rate ({currency}/kWh)",
-                value=float(tariff_structure_cfg.get("day_rate", 0.33) if isinstance(tariff_structure_cfg, dict) else 0.33),
+                key="flat_rate_input",
                 step=0.01,
                 min_value=0.0,
             )
             tariff_structure_cfg = {"day_rate": flat_rate, "night_rate": flat_rate}
 
         elif tariff_mode == "Day/Night":
-            if isinstance(tariff_structure_cfg, dict):
-                day_rate_default = float(tariff_structure_cfg.get("day_rate", 0.33))
-                night_rate_default = float(tariff_structure_cfg.get("night_rate", 0.15))
-                night_start_default = tariff_structure_cfg.get("night_start", "00:00")
-                night_end_default = tariff_structure_cfg.get("night_end", "07:00")
-            else:
-                day_rate_default = 0.33
-                night_rate_default = 0.15
-                night_start_default = "00:00"
-                night_end_default = "07:00"
+            # Ensure keys exist on first run
+            st.session_state.setdefault("day_rate_input", 0.33)
+            st.session_state.setdefault("night_rate_input", 0.15)
+            st.session_state.setdefault("night_start_input", "00:00")
+            st.session_state.setdefault("night_end_input", "07:00")
 
-            day_rate = st.number_input(f"Day rate ({currency}/kWh)", value=day_rate_default, step=0.01, min_value=0.0)
-            night_rate = st.number_input(f"Night rate ({currency}/kWh)", value=night_rate_default, step=0.01, min_value=0.0)
+            day_rate = st.number_input(f"Day rate ({currency}/kWh)", key="day_rate_input", step=0.01, min_value=0.0)
+            night_rate = st.number_input(f"Night rate ({currency}/kWh)", key="night_rate_input", step=0.01, min_value=0.0)
             col_ns, col_ne = st.columns(2)
             with col_ns:
-                night_start = st.text_input("Night start (HH:MM)", value=night_start_default)
+                night_start = st.text_input("Night start (HH:MM)", key="night_start_input")
             with col_ne:
-                night_end = st.text_input("Night end (HH:MM)", value=night_end_default)
+                night_end = st.text_input("Night end (HH:MM)", key="night_end_input")
 
             tariff_structure_cfg = {
                 "day_rate": day_rate,
@@ -1051,10 +1079,18 @@ def render_configuration_interface(uploaded_files):
         # ------------------------------------------------------------------
         st.subheader("Heat Pump Config Change History")
         st.caption("Keep a simple log of configuration changes; entries are timestamped automatically.")
-        # Ensure config_history is initialized from defaults (including loaded profile) if not already set in-session
-        if "config_history" not in st.session_state:
-            st.session_state["config_history"] = list(defaults.get("config_history") or [])
-        st.session_state.setdefault("new_change_tag", "")
+
+        # Use a signature to detect when a new profile is loaded, and reset the history from it.
+        # This is robust against reruns and loading the same file again.
+        history_from_profile = defaults.get("config_history", [])
+        history_signature = json.dumps(history_from_profile, sort_keys=True)
+
+        if st.session_state.get("history_signature") != history_signature:
+            st.session_state["config_history"] = list(history_from_profile)
+            st.session_state["history_signature"] = history_signature
+
+        # Ensure keys exist for the input widgets on first run
+        st.session_state.setdefault("config_history", [])
         st.session_state.setdefault("new_change_note", "")
 
         def _add_change_cb() -> None:
@@ -1183,4 +1219,3 @@ def render_config_download(config: dict) -> None:
         type="secondary",
         key=f"save_btn_{profile_name.replace(' ', '_')}",
     )
-

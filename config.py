@@ -307,23 +307,24 @@ ZONE_TO_ROOM_MAP = {
     'Zone_3': ['Room_5', 'Room_6'],
 }
 
-TARIFF_STRUCTURE = [
-    {
-        "valid_from": "2023-01-01",
-        "name": "Flat Default Tariff",
-        "rules": [
-            {"name": "All Day", "start": "00:00", "end": "24:00", "rate": 0.30},
-        ],
-    }
-]
-
-CONFIG_HISTORY = [
-    {"start": "2023-01-01", "config_tag": "baseline_v1", "change_note": "Initial commissioning."},
-    {"start": "2025-11-28", "config_tag": "Pump & Hydraulic Fix", "change_note": "Primary/Secondary Pumps to Constant Speed II."},
-    {"start": "2025-11-30", "config_tag": "Data Fix & DHW Tuning", "change_note": "HA Helpers updated. DHW Target 50C."},
-    {"start": "2025-12-01", "config_tag": "Sequential Schedule", "change_note": "DHW Night 02:00-03:00, Heating U/F 03:00-06:00."},
-    {"start": "2025-12-04", "config_tag": "Sequential Schedule", "change_note": "DHW Day 13:00-13:59, Heating D/S Thermostat 13:00-14:00 @ 17.5C."}
-]
+# Legacy hardcoded tariff and history - now handled in UI and profile JSON files.
+# TARIFF_STRUCTURE = [
+#     {
+#         "valid_from": "2023-01-01",
+#         "name": "Flat Default Tariff",
+#         "rules": [
+#             {"name": "All Day", "start": "00:00", "end": "24:00", "rate": 0.30},
+#         ],
+#     }
+# ]
+#
+# CONFIG_HISTORY = [
+#     {"start": "2023-01-01", "config_tag": "baseline_v1", "change_note": "Initial commissioning."},
+#     {"start": "2025-11-28", "config_tag": "Pump & Hydraulic Fix", "change_note": "Primary/Secondary Pumps to Constant Speed II."},
+#     {"start": "2025-11-30", "config_tag": "Data Fix & DHW Tuning", "change_note": "HA Helpers updated. DHW Target 50C."},
+#     {"start": "2025-12-01", "config_tag": "Sequential Schedule", "change_note": "DHW Night 02:00-03:00, Heating U/F 03:00-06:00."},
+#     {"start": "2025-12-04", "config_tag": "Sequential Schedule", "change_note": "DHW Day 13:00-13:59, Heating D/S Thermostat 13:00-14:00 @ 17.5C."}
+# ]
 
 AI_SYSTEM_CONTEXT = """
 SYSTEM CONTEXT FOR AI ANALYSIS (HEAT PUMP PHYSICS & SETTINGS):

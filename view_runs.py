@@ -19,15 +19,8 @@ from datetime import datetime, timezone
 
 
 from config import (
-
     CALC_VERSION,
-
-    TARIFF_PROFILE_ID,
-
-    CONFIG_HISTORY,
-
     THRESHOLDS,
-
 )
 
 from utils import safe_div, strip_entity_prefix
@@ -1057,20 +1050,25 @@ def render_run_inspector(df, runs_list):
 
         active_note = "Initial commissioning."
 
-
-
-        for entry in sorted(CONFIG_HISTORY, key=lambda x: x["start"]):
-
+        # Get history from the loaded profile, not the legacy config
+        config_history = user_config.get("config_history", []) if isinstance(user_config, dict) else []
+        for entry in sorted(config_history, key=lambda x: str(x.get("start", ""))):
             if run_date_str >= entry["start"]:
-
                 active_tag = entry["config_tag"]
-
                 active_note = entry.get("change_note", "")
-
             else:
-
                 break
 
+        # Derive tariff name from profile, not legacy config
+        tariff_name = "Unknown"
+        tariff = user_config.get("tariff_structure")
+        if isinstance(tariff, list) and tariff:
+            tariff_name = tariff[0].get("name", "Custom")
+        elif isinstance(tariff, dict):
+            if tariff.get("day_rate") == tariff.get("night_rate", tariff.get("day_rate")):
+                tariff_name = "Flat Rate"
+            else:
+                tariff_name = "Day/Night"
 
 
         # Economics
@@ -1187,9 +1185,7 @@ def render_run_inspector(df, runs_list):
                 "active_profile_tag": active_tag,
 
                 "change_note_if_new": active_note,
-
-                "tariff_profile": TARIFF_PROFILE_ID,
-
+                "tariff_profile": tariff_name,
             },
 
             "economics": {
@@ -1438,5 +1434,3 @@ def render_run_inspector(df, runs_list):
 
 
         st.json(ai_payload)
-
-

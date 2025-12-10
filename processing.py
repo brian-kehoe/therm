@@ -9,7 +9,6 @@ from config import (
     SPECIFIC_HEAT_CAPACITY,
     PHYSICS_THRESHOLDS,
     NIGHT_HOURS,
-    TARIFF_STRUCTURE,
 )
 from utils import safe_div, strip_entity_prefix
 
@@ -610,10 +609,12 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
     # Retain legacy "is_night_rate" for any downstream logic/visuals
     d["is_night_rate"] = d["hour"].isin(NIGHT_HOURS)
 
+    # Always use the tariff from the user profile; default to an empty list if absent.
+    # The tariff engine handles this gracefully by applying a default flat rate.
     tariff_structure = (
-        user_config.get("tariff_structure", TARIFF_STRUCTURE)
+        user_config.get("tariff_structure", [])
         if isinstance(user_config, dict)
-        else TARIFF_STRUCTURE
+        else []
     )
 
     try:

@@ -43,7 +43,14 @@ def export_config_for_sharing(config):
     Creates a clean version of the config for download.
     """
     # Preserve editable fields from the in-memory config (including updated profile_name)
-    export_data = {k: (config.get(k, []) if k == "config_history" else config.get(k, {})) for k in PRESERVED_KEYS}
+    export_data = {}
+    for k in PRESERVED_KEYS:
+        # Default list-like structures to an empty list, others to an empty dict.
+        # This prevents custom tariffs (lists) from being saved as empty dicts on error.
+        if k in ["config_history", "tariff_structure"]:
+            export_data[k] = config.get(k, [])
+        else:
+            export_data[k] = config.get(k, {})
 
     # Fill defaults where absent
     export_data["therm_version"] = export_data.get("therm_version") or "2.0"
