@@ -845,7 +845,9 @@ if uploaded_files:
                 st.session_state["ai_context_user"] = st.session_state["system_config"].get("ai_context", {})
 
                 if mode == "Long-Term Trends":
-                    view_trends.render_long_term_trends(data["daily"], data["df"], data["runs"])
+                    view_trends.render_long_term_trends(
+                        data["daily"], data["df"], data["runs"], st.session_state.get("system_config")
+                    )
                 elif mode == "Run Inspector":
                     view_runs.render_run_inspector(data["df"], data["runs"])
                 elif mode == "Data Quality Audit":

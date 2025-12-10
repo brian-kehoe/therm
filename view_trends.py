@@ -12,7 +12,7 @@ from config import CALC_VERSION, AI_SYSTEM_CONTEXT
 from utils import safe_div
 
 
-def render_long_term_trends(daily_df: pd.DataFrame, raw_df: pd.DataFrame, runs_list: list) -> None:
+def render_long_term_trends(daily_df: pd.DataFrame, raw_df: pd.DataFrame, runs_list: list, user_config: dict | None = None) -> None:
     """
     Long-term performance view:
     - KPI cards
@@ -40,6 +40,10 @@ def render_long_term_trends(daily_df: pd.DataFrame, raw_df: pd.DataFrame, runs_l
 
         total_heat = float(daily_df.get("Total_Heat_kWh", 0).sum())
         total_elec = float(daily_df.get("Total_Electricity_kWh", 0).sum())
+        currency = "€"
+        if isinstance(user_config, dict):
+            currency = user_config.get("currency", currency)
+
         total_cost = float(daily_df.get("Daily_Cost_Euro", 0).sum())
         scop = safe_div(total_heat, total_elec)
 

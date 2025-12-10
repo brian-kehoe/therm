@@ -263,6 +263,31 @@ def _parse_tariff_profiles(tariff_structure) -> list:
       ...
     ]
     """
+    # Allow dict forms (flat or day/night) by normalising to a single profile
+    if isinstance(tariff_structure, dict):
+        try:
+            day_rate = float(tariff_structure.get("day_rate", 0.35))
+        except Exception:
+            day_rate = 0.35
+        try:
+            night_rate = float(tariff_structure.get("night_rate", day_rate))
+        except Exception:
+            night_rate = day_rate
+        night_start = str(tariff_structure.get("night_start", "00:00"))
+        night_end = str(tariff_structure.get("night_end", "07:00"))
+
+        rules = [
+            {"name": "Night", "start": night_start, "end": night_end, "rate": night_rate},
+            {"name": "Day", "start": night_end, "end": night_start, "rate": day_rate},
+        ]
+
+        tariff_structure = [
+            {
+                "valid_from": tariff_structure.get("valid_from", "1970-01-01"),
+                "rules": rules,
+            }
+        ]
+
     if not isinstance(tariff_structure, (list, tuple)):
         return []
 
