@@ -157,6 +157,7 @@ def render_long_term_trends(daily_df: pd.DataFrame, raw_df: pd.DataFrame, runs_l
                     xanchor="right",
                     x=1,
                 ),
+                margin=dict(t=40, b=20),
             )
             st.plotly_chart(fig, width="stretch", key="daily_energy_chart")
         else:

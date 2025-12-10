@@ -92,6 +92,15 @@ st.markdown(
     [data-testid="stSidebar"] [data-testid="stRadio"] {
         margin-bottom: -2rem !important;
     }
+    /* Reduce spacing around all h3 elements (subheaders) */
+    h3 {
+        margin-bottom: -1rem !important;
+    }
+    /* Reduce spacing around Plotly charts */
+    [data-testid="stPlotlyChart"] {
+        margin-top: -1rem !important;
+        margin-bottom: -1rem !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
