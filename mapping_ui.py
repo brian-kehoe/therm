@@ -960,7 +960,7 @@ def render_configuration_interface(uploaded_files):
                     {"name": "Day",        "start": "08:00", "end": "17:00", "rate": 0.33},
                     {"name": "Peak",       "start": "17:00", "end": "19:00", "rate": 0.45},
                     {"name": "Day",        "start": "19:00", "end": "23:00", "rate": 0.33},
-                    {"name": "Night",      "start": "23:00", "end": "24:00", "rate": 0.20},
+                    {"name": "Night",      "start": "23:00", "end": "23:59", "rate": 0.20},
                 ]
 
             rules_df = pd.DataFrame(rules_default)
