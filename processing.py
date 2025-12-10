@@ -414,14 +414,22 @@ def apply_gatekeepers(df: pd.DataFrame, user_config: dict | None = None) -> pd.D
     except Exception:
         # Unit conversion is best-effort; never break the pipeline
         pass
-    thresholds = PHYSICS_THRESHOLDS if isinstance(PHYSICS_THRESHOLDS, dict) else {}
+    # Merge physics thresholds with any user overrides
+    physics_defaults = PHYSICS_THRESHOLDS if isinstance(PHYSICS_THRESHOLDS, dict) else {}
+    user_phys = user_config.get("physics_thresholds", {}) if isinstance(user_config, dict) else {}
+    thresholds = {**physics_defaults, **user_phys}
+
+    # Merge general thresholds (used for power_min)
+    general_defaults = THRESHOLDS if isinstance(THRESHOLDS, dict) else {}
+    user_thresh = user_config.get("thresholds", {}) if isinstance(user_config, dict) else {}
+    general_thresholds = {**general_defaults, **user_thresh}
 
     # 1. Physics
     d = calculate_physics_metrics(d)
     _debug_engine_state(d, "after physics (DeltaT)")
 
     # 2. Activity
-    power_min = thresholds.get("power_min", 50)
+    power_min = general_thresholds.get("power_min", 50)
     if "Power" not in d.columns:
         raise KeyError(
             "Power column missing after mapping. Please ensure the Power role "
@@ -656,11 +664,15 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
 
     df = df.copy()
 
-    min_run_duration = THRESHOLDS.get("minimum_run_duration_min", 5)
-    min_unzoned_run_duration = THRESHOLDS.get(
+    threshold_defaults = THRESHOLDS if isinstance(THRESHOLDS, dict) else {}
+    user_thresholds = user_config.get("thresholds", {}) if isinstance(user_config, dict) else {}
+    thresholds = {**threshold_defaults, **user_thresholds}
+
+    min_run_duration = thresholds.get("minimum_run_duration_min", 5)
+    min_unzoned_run_duration = thresholds.get(
         "min_heating_run_minutes_with_no_zones", max(min_run_duration, 8)
     )
-    min_unzoned_heat_kwh = THRESHOLDS.get(
+    min_unzoned_heat_kwh = thresholds.get(
         "min_heating_run_heat_kwh_with_no_zones", 0.25
     )
 
@@ -766,17 +778,19 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                     else 0.0
                 )
                 heating_during_dhw_pct = float(zone_on_pct)
-                heating_during_dhw_detected = zone_on_pct >= 0.15
+                detection_pct_threshold = thresholds.get("heating_during_dhw_detection_pct", 0.15)
+                heating_during_dhw_detected = zone_on_pct >= detection_pct_threshold
                 heating_during_dhw_detection_source = "zones"
             # Fallback: indoor power proxy if no zone signals
             elif "Indoor_Power" in group.columns:
-                power_threshold = THRESHOLDS.get("heating_during_dhw_power_threshold", 120)
+                power_threshold = thresholds.get("heating_during_dhw_power_threshold", 120)
                 power_series = pd.to_numeric(group["Indoor_Power"], errors="coerce").fillna(0)
                 power_over_threshold_pct = (
                     float((power_series > power_threshold).mean()) if len(power_series) > 0 else 0.0
                 )
                 heating_during_dhw_pct = power_over_threshold_pct
-                heating_during_dhw_power_detected = power_over_threshold_pct >= 0.15
+                detection_pct_threshold = thresholds.get("heating_during_dhw_detection_pct", 0.15)
+                heating_during_dhw_power_detected = power_over_threshold_pct >= detection_pct_threshold
                 heating_during_dhw_detection_source = "power"
 
         # DHW Temperature Profile (DHW runs only)
@@ -830,7 +844,7 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
         # ================================================================
 
         # 1. Short-Cycle Flag
-        short_cycle_threshold = THRESHOLDS.get("short_cycle_min", 20)
+        short_cycle_threshold = thresholds.get("short_cycle_min", 20)
         is_short_cycle = duration_mins < short_cycle_threshold
 
         # 2. Outdoor Temperature Change During Run

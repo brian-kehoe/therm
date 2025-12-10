@@ -19,6 +19,7 @@ THRESHOLDS = {
     "dhw_scop_low": 2.2,
     "night_share_elec_low": 0.30,
     "heating_during_dhw_power_threshold": 120,    # W - Indoor Power level indicating heating during DHW via power proxy
+    "heating_during_dhw_detection_pct": 0.15,     # Fraction of DHW run with heating evidence to trigger warning
     # Run detection guards
     "min_heating_run_minutes_with_no_zones": 8,
     "min_heating_run_heat_kwh_with_no_zones": 0.25,
