@@ -302,10 +302,16 @@ def _parse_tariff_profiles(tariff_structure) -> list:
             vf = pd.Timestamp.min.date()
 
         rules = []
+        def _parse_hhmm(val: str) -> pd.Timestamp.time:
+            # Handle common "24:00" input by clamping to 23:59:59 to avoid wrap errors
+            s = str(val)
+            if s in ("24:00", "24:00:00"):
+                s = "23:59:59"
+            return pd.to_datetime(s, errors="coerce").time()
         for r in p.get("rules", []):
             try:
-                start = pd.to_datetime(r.get("start", "00:00")).time()
-                end = pd.to_datetime(r.get("end", "00:00")).time()
+                start = _parse_hhmm(r.get("start", "00:00"))
+                end = _parse_hhmm(r.get("end", "00:00"))
             except Exception:
                 continue
 
