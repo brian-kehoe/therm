@@ -950,9 +950,12 @@ def render_configuration_interface(uploaded_files):
                             "rate": r.get("rate", 0.35),
                         }
                     )
-            if not rules_default:
-                # Default to full 24h coverage using the multi-band template
-                # (Night, EV, Night, Day, Peak, Day, Night)
+            # If no rules, or a single flat all-day rule, seed with multi-band template
+            if not rules_default or (
+                len(rules_default) == 1
+                and str(rules_default[0].get("start")) in ("00:00", "00:00:00")
+                and str(rules_default[0].get("end")) in ("24:00", "24:00:00")
+            ):
                 rules_default = [
                     {"name": "Night",      "start": "00:00", "end": "02:00", "rate": 0.20},
                     {"name": "Night (EV)", "start": "02:00", "end": "05:00", "rate": 0.075},
