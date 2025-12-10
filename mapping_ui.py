@@ -849,10 +849,14 @@ def render_configuration_interface(uploaded_files):
                 return "Custom bands"
             return "Flat"
 
+        tariff_mode_default = _infer_mode(tariff_structure_cfg)
+        if "tariff_mode" not in st.session_state:
+            st.session_state["tariff_mode"] = tariff_mode_default
         tariff_mode = st.radio(
             "Tariff / Cost Structure",
             options=["Flat", "Day/Night", "Custom bands"],
-            index=["Flat", "Day/Night", "Custom bands"].index(_infer_mode(tariff_structure_cfg)),
+            index=["Flat", "Day/Night", "Custom bands"].index(st.session_state["tariff_mode"]),
+            key="tariff_mode",
             help="Define how electricity cost varies over time.",
         )
 
