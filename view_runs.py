@@ -185,22 +185,14 @@ def render_run_inspector(df, runs_list):
 
 
 
+        heating_during_dhw = bool(
+            r.get("heating_during_dhw_detected") or r.get("heating_during_dhw_power_detected")
+        )
+
         if r["run_type"] == "DHW":
-
-            # Use a water drop to represent DHW runs; annotate if heating was also active
-
+            # Use a water drop to represent DHW runs
             icon = "💧"
-
-            if r.get("heating_during_dhw_detected") or r.get(
-
-                "heating_during_dhw_power_detected"
-
-            ):
-
-                icon += " (Heating Active)"
-
         else:
-
             icon = "🔥"
 
 
@@ -228,23 +220,19 @@ def render_run_inspector(df, runs_list):
         )
 
         if show_zone:
-
-            zone_label = (
-
-                zone_raw if zone_raw and str(zone_raw).lower() != "none" else "No Zone Data"
-
-            )
-
+            zone_label = zone_raw if zone_raw and str(zone_raw).lower() != "none" else "No Zone Data"
         else:
-
             zone_label = ""
 
-
+        # Avoid redundant "(DHW)" suffix when the run itself is DHW
+        if heating_during_dhw and r["run_type"] == "DHW":
+            if zone_label.strip().lower() == "dhw":
+                zone_label = ""
 
         label = f"{start_str} | {r['duration_mins']}m | {icon} {r['run_type']}"
-
+        if heating_during_dhw and r["run_type"] == "DHW":
+            label = f"{label} (Heating Active❗)"
         if zone_label:
-
             label = f"{label} ({zone_label})"
 
         run_options[label] = r
@@ -603,31 +591,18 @@ def render_run_inspector(df, runs_list):
             )
 
             fig_flow.update_layout(
-
                 title="Flow Rate",
-
-                margin=dict(l=10, r=10, t=30, b=10),
-
+                margin=dict(l=10, r=10, t=30, b=80),
                 height=200,
-
                 hovermode="x unified",
-
                 showlegend=True,
-
                 legend=dict(
-
                     orientation="h",
-
                     yanchor="top",
-
-                    y=-0.12,
-
+                    y=-0.35,
                     xanchor="left",
-
                     x=0,
-
                 ),
-
             )
 
             st.plotly_chart(fig_flow, width="stretch", key="run_hydro_flow")
@@ -757,31 +732,18 @@ def render_run_inspector(df, runs_list):
             )
 
             fig_zones.update_layout(
-
                 title="Active Zones",
-
-                margin=dict(l=10, r=10, t=30, b=10),
-
+                margin=dict(l=10, r=10, t=30, b=80),
                 height=max(220, 140 + 20 * len(ordered_keys)),
-
                 hovermode="x unified",
-
                 showlegend=True,
-
                 legend=dict(
-
                     orientation="h",
-
-                    yanchor="bottom",
-
-                    y=1.08,
-
+                    yanchor="top",
+                    y=-0.35,
                     xanchor="left",
-
                     x=0,
-
                 ),
-
             )
 
             st.plotly_chart(fig_zones, width="stretch", key="run_hydro_zones")
@@ -834,7 +796,7 @@ def render_run_inspector(df, runs_list):
 
                 title="Hot Water / Return Temps",
 
-                margin=dict(l=10, r=10, t=30, b=10),
+                margin=dict(l=10, r=10, t=30, b=100),
 
                 height=220,
 
@@ -846,9 +808,9 @@ def render_run_inspector(df, runs_list):
 
                     orientation="h",
 
-                    yanchor="bottom",
+                    yanchor="top",
 
-                    y=1.08,
+                    y=-0.36,
 
                     xanchor="left",
 
