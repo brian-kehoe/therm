@@ -385,11 +385,12 @@ def render_configuration_interface(uploaded_files):
                         for z_key, links in (defaults.get("rooms_per_zone") or {}).items():
                             st.session_state[f"link_{z_key}"] = links
 
+                        # 4. Sync profile name when loading a new/different profile
+                        st.session_state["profile_name_input"] = defaults["profile_name"]
+
                     _log(f"profile_apply_defaults secs={time.time()-t_profile:.3f}")
                     profile_loaded = True
                     loaded_profile_name = defaults["profile_name"]
-                    # Sync profile name state with loaded profile
-                    st.session_state["profile_name_input"] = defaults["profile_name"]
                 except Exception:
                     st.error("Failed to load profile JSON.")
 
