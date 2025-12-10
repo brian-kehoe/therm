@@ -249,16 +249,16 @@ def render_configuration_interface(uploaded_files):
     body_section = st.container()
 
     # Defaults that can be overridden by a loaded profile
-        defaults = {
-            "mapping": {},
-            "units": {},
-            "ai_context": {},
-            "profile_name": "My Heat Pump",
-            "rooms_per_zone": {},
-            "thresholds": {},
-            "physics_thresholds": {},
-            "tariff_structure": config.TARIFF_STRUCTURE,
-        }
+    defaults = {
+        "mapping": {},
+        "units": {},
+        "ai_context": {},
+        "profile_name": "My Heat Pump",
+        "rooms_per_zone": {},
+        "thresholds": {},
+        "physics_thresholds": {},
+        "tariff_structure": config.TARIFF_STRUCTURE,
+    }
 
     # Cached entity list (may be empty if skipping scan)
     available_entities = st.session_state.get("available_sensors", []) or []
