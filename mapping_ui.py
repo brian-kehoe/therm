@@ -827,12 +827,17 @@ def render_configuration_interface(uploaded_files):
         # ------------------------------------------------------------------
         ai_inputs: dict = {}
         for k, p in AI_CONTEXT_PROMPTS.items():
-            default_text = defaults["ai_context"].get(k, p.get("placeholder", ""))
-            ai_inputs[k] = st.text_area(
+            existing = defaults["ai_context"].get(k, "")
+            entered = st.text_area(
                 p["label"],
-                value=default_text,
+                value=existing,
+                placeholder=p.get("placeholder", ""),
                 help=p["help"],
             )
+            # If the user leaves the placeholder untouched (or empty), store as empty
+            if not entered or entered.strip() == (p.get("placeholder", "").strip()):
+                entered = ""
+            ai_inputs[k] = entered
 
         config_object = {
             "profile_name": profile_name,
