@@ -65,8 +65,7 @@ def _build_system_context(user_config: dict | None, include_heating_note: bool) 
         parts.append(
             "Heating during DHW detected: zone pumps active during DHW can cause return mixing and low COP; attribute DHW efficiency penalties accordingly."
         )
-    return "
-".join(parts) if parts else "No additional system context supplied."
+    return "\n".join(parts) if parts else "No additional system context supplied."
 
 def _get_friendly_name(internal_key: str, user_config: dict) -> str:
 
