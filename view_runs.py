@@ -13,6 +13,7 @@ from config import (
     AI_SYSTEM_CONTEXT,
     TARIFF_PROFILE_ID,
     CONFIG_HISTORY,
+    THRESHOLDS,
 )
 from utils import safe_div, strip_entity_prefix
 
@@ -612,11 +613,16 @@ def render_run_inspector(df, runs_list):
                 ),
                 "kwh_heat": round(selected_run.get("heat_kwh", 0), 2),
                 "effective_cop": round(selected_run.get("run_cop", 0), 2),
+                "cost_per_kwh_heat_euro": (
+                    round(selected_run.get("cost_per_kwh_heat"), 3)
+                    if selected_run.get("cost_per_kwh_heat") is not None
+                    else None
+                ),
                 "immersion_kwh_estimated": selected_run.get(
                     "immersion_kwh", 0
                 ),
-                "immersion_was_active": selected_run.get(
-                    "immersion_detected", False
+                "immersion_was_active": bool(
+                    selected_run.get("immersion_detected", False)
                 ),
                 "immersion_active_minutes": selected_run.get(
                     "immersion_mins", 0
@@ -627,11 +633,41 @@ def render_run_inspector(df, runs_list):
                 "avg_delta_t": round(selected_run.get("avg_dt", 0), 2),
                 "avg_flow_temp_c": round(avg_flow_temp, 1),
                 "max_flow_temp_c": round(max_flow_temp, 1),
+                "avg_return_temp_c": (
+                    round(selected_run.get("avg_return_temp"), 1)
+                    if selected_run.get("avg_return_temp") is not None
+                    else None
+                ),
+                "min_return_temp_c": (
+                    round(selected_run.get("min_return_temp"), 1)
+                    if selected_run.get("min_return_temp") is not None
+                    else None
+                ),
+                "return_temp_range_c": (
+                    round(selected_run.get("return_temp_range"), 1)
+                    if selected_run.get("return_temp_range") is not None
+                    else None
+                ),
                 "target_flow_temp_avg": (
                     round(target_flow, 1) if target_flow else None
                 ),
                 "compressor_stats": {
                     "avg_hz": round(avg_hz, 1),
+                    "min_hz": (
+                        round(selected_run.get("min_freq"), 1)
+                        if selected_run.get("min_freq") is not None
+                        else None
+                    ),
+                    "max_hz": (
+                        round(selected_run.get("max_freq"), 1)
+                        if selected_run.get("max_freq") is not None
+                        else None
+                    ),
+                    "std_dev_hz": (
+                        round(selected_run.get("freq_std_dev"), 1)
+                        if selected_run.get("freq_std_dev") is not None
+                        else None
+                    ),
                     "pct_time_low_modulation (<25Hz)": round(
                         pct_low_hz, 1
                     ),
@@ -646,12 +682,31 @@ def render_run_inspector(df, runs_list):
                     "quiet_mode_active", False
                 ),
             },
+            "run_characteristics": {
+                "is_short_cycle": selected_run.get("is_short_cycle", False),
+                "short_cycle_threshold_minutes": THRESHOLDS.get("short_cycle_min", 20),
+            },
             "environmental_conditions": {
                 "outdoor_temp_avg": round(
                     run_data["OutdoorTemp"].mean(), 1
                 )
                 if "OutdoorTemp" in run_data.columns
                 else None,
+                "outdoor_temp_min": (
+                    round(selected_run.get("outdoor_temp_min"), 1)
+                    if selected_run.get("outdoor_temp_min") is not None
+                    else None
+                ),
+                "outdoor_temp_max": (
+                    round(selected_run.get("outdoor_temp_max"), 1)
+                    if selected_run.get("outdoor_temp_max") is not None
+                    else None
+                ),
+                "outdoor_temp_change_c": (
+                    round(selected_run.get("outdoor_temp_change"), 1)
+                    if selected_run.get("outdoor_temp_change") is not None
+                    else None
+                ),
                 "outdoor_humidity_avg": round(
                     run_data["Outdoor_Humidity"].mean(), 1
                 )
@@ -663,13 +718,6 @@ def render_run_inspector(df, runs_list):
                 if "Wind_Speed" in run_data.columns
                 else None,
             },
-            "dhw_temperature_profile": {
-                "start_c": round(
-                    selected_run.get("dhw_temp_start", 0), 1
-                ),
-                "end_c": round(selected_run.get("dhw_temp_end", 0), 1),
-                "rise_c": round(selected_run.get("dhw_rise", 0), 1),
-            },
         }
 
         if selected_run["run_type"] == "Heating":
@@ -678,12 +726,39 @@ def render_run_inspector(df, runs_list):
             )
 
         if selected_run["run_type"] == "DHW":
-            ai_payload["hydraulic_integrity"] = {
-                "heating_during_dhw_detected": selected_run.get(
-                    "heating_during_dhw_detected", False
+            ai_payload["dhw_temperature_profile"] = {
+                "start_c": (
+                    round(selected_run.get("dhw_temp_start"), 1)
+                    if selected_run.get("dhw_temp_start") is not None
+                    else None
                 ),
-                "ghost_pumping_power_detected": selected_run.get(
-                    "ghost_pumping_power_detected", False
+                "end_c": (
+                    round(selected_run.get("dhw_temp_end"), 1)
+                    if selected_run.get("dhw_temp_end") is not None
+                    else None
+                ),
+                "rise_c": (
+                    round(selected_run.get("dhw_rise"), 1)
+                    if selected_run.get("dhw_rise") is not None
+                    else None
+                ),
+                "stratification_range_c": (
+                    round(selected_run.get("dhw_stratification_range"), 1)
+                    if selected_run.get("dhw_stratification_range") is not None
+                    else None
+                ),
+            }
+
+            ai_payload["hydraulic_integrity"] = {
+                "heating_during_dhw_detected": (
+                    bool(selected_run.get("heating_during_dhw_detected"))
+                    if selected_run.get("heating_during_dhw_detected") is not None
+                    else None
+                ),
+                "ghost_pumping_power_detected": (
+                    bool(selected_run.get("ghost_pumping_power_detected"))
+                    if selected_run.get("ghost_pumping_power_detected") is not None
+                    else None
                 ),
                 "heating_during_dhw_pct": selected_run.get(
                     "heating_during_dhw_pct", 0.0

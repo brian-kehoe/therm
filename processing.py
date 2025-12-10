@@ -750,6 +750,8 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 relevant_rooms.extend(rooms_per_zone.get(z, []))
         relevant_rooms = list(set(relevant_rooms))
 
+        duration_mins = len(group)
+
         # Ghost pumping during DHW
         heating_during_dhw_pct = None
         heating_during_dhw_detected = None
@@ -777,6 +779,84 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 ghost_pumping_power_detected = ghost_power_pct >= 0.15
                 ghost_detection_source = "power"
 
+        # DHW Temperature Profile (DHW runs only)
+        dhw_temp_start = None
+        dhw_temp_end = None
+        dhw_rise = None
+        if run_type == "DHW" and "DHW_Temp" in group.columns:
+            dhw_series = pd.to_numeric(group["DHW_Temp"], errors="coerce").dropna()
+            if len(dhw_series) > 0:
+                dhw_temp_start = float(dhw_series.iloc[0])
+                dhw_temp_end = float(dhw_series.iloc[-1])
+                dhw_rise = dhw_temp_end - dhw_temp_start
+
+        # DHW_Mode tracking (capture modal value during run)
+        dhw_mode_value = None
+        if run_type == "DHW" and "DHW_Mode" in group.columns:
+            # Get most common DHW_Mode value during run (mode of the series)
+            mode_series = group["DHW_Mode"].dropna()
+            if len(mode_series) > 0:
+                dhw_mode_value = mode_series.mode().iloc[0] if len(mode_series.mode()) > 0 else None
+
+        # Immersion Detection (boolean flag)
+        immersion_kwh = group["Immersion_Power"].sum() / 60000.0
+        immersion_mins = int(group["Immersion_Active"].sum())
+        immersion_detected = immersion_kwh > 0.001  # Threshold: >1Wh indicates usage
+
+        # Return Temperature Stats
+        avg_return_temp = None
+        min_return_temp = None
+        return_temp_range = None
+        if "ReturnTemp" in group.columns:
+            return_series = pd.to_numeric(group["ReturnTemp"], errors="coerce").dropna()
+            if len(return_series) > 0:
+                avg_return_temp = float(return_series.mean())
+                min_return_temp = float(return_series.min())
+                return_temp_range = float(return_series.max() - return_series.min())
+
+        # Compressor Frequency Stats (enhanced)
+        min_freq = None
+        max_freq = None
+        freq_std_dev = None
+        if "Freq" in group.columns:
+            freq_series = pd.to_numeric(group["Freq"], errors="coerce").dropna()
+            if len(freq_series) > 0:
+                min_freq = float(freq_series.min())
+                max_freq = float(freq_series.max())
+                freq_std_dev = float(freq_series.std())
+
+        # ================================================================
+        # PHASE 1 QUICK WIN METRICS (5-star additions)
+        # ================================================================
+
+        # 1. Short-Cycle Flag
+        short_cycle_threshold = THRESHOLDS.get("short_cycle_min", 20)
+        is_short_cycle = duration_mins < short_cycle_threshold
+
+        # 2. Outdoor Temperature Change During Run
+        outdoor_temp_change = None
+        outdoor_temp_min = None
+        outdoor_temp_max = None
+        if "OutdoorTemp" in group.columns:
+            outdoor_series = pd.to_numeric(group["OutdoorTemp"], errors="coerce").dropna()
+            if len(outdoor_series) > 0:
+                outdoor_temp_min = float(outdoor_series.min())
+                outdoor_temp_max = float(outdoor_series.max())
+                outdoor_temp_change = outdoor_temp_max - outdoor_temp_min
+
+        # 3. Cost per kWh Heat (normalized efficiency metric)
+        cost_per_kwh_heat = None
+        if "Cost_Inc" in group.columns and heat_kwh > 0:
+            run_cost = group["Cost_Inc"].sum()
+            cost_per_kwh_heat = safe_div(run_cost, heat_kwh)
+
+        # 4. DHW Stratification Range (mixing/quality indicator)
+        dhw_stratification_range = None
+        if run_type == "DHW" and "DHW_Temp" in group.columns:
+            dhw_series = pd.to_numeric(group["DHW_Temp"], errors="coerce").dropna()
+            if len(dhw_series) > 0:
+                dhw_stratification_range = float(dhw_series.max() - dhw_series.min())
+
         # Room Deltas
         room_deltas: dict[str, float] = {}
         for r in room_cols:
@@ -786,8 +866,6 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 end_t = series.iloc[-1]
                 friendly_r = get_friendly_name(r, user_config)
                 room_deltas[friendly_r] = round(end_t - start_t, 2)
-
-        duration_mins = len(group)
 
         # Filter out zone-less, tiny heating blips (often noise from Grafana ingest)
         if (
@@ -819,12 +897,42 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 "dominant_zones": dominant_zones_str,
                 "room_deltas": room_deltas,
                 "relevant_rooms": relevant_rooms,
-                "immersion_kwh": group["Immersion_Power"].sum() / 60000.0,
-                "immersion_mins": group["Immersion_Active"].sum(),
+                "immersion_kwh": immersion_kwh,
+                "immersion_mins": immersion_mins,
+                "immersion_detected": bool(immersion_detected),
                 "heating_during_dhw_pct": heating_during_dhw_pct,
-                "heating_during_dhw_detected": heating_during_dhw_detected,
-                "ghost_pumping_power_detected": ghost_pumping_power_detected,
+                "heating_during_dhw_detected": (
+                    bool(heating_during_dhw_detected)
+                    if heating_during_dhw_detected is not None
+                    else None
+                ),
+                "ghost_pumping_power_detected": (
+                    bool(ghost_pumping_power_detected)
+                    if ghost_pumping_power_detected is not None
+                    else None
+                ),
                 "ghost_detection_source": ghost_detection_source,
+                # DHW Temperature Profile
+                "dhw_temp_start": dhw_temp_start,
+                "dhw_temp_end": dhw_temp_end,
+                "dhw_rise": dhw_rise,
+                # DHW Mode
+                "dhw_mode": dhw_mode_value,
+                # Return Temperature Stats
+                "avg_return_temp": avg_return_temp,
+                "min_return_temp": min_return_temp,
+                "return_temp_range": return_temp_range,
+                # Compressor Frequency Stats (enhanced)
+                "min_freq": min_freq,
+                "max_freq": max_freq,
+                "freq_std_dev": freq_std_dev,
+                # Phase 1 Quick Win Metrics
+                "is_short_cycle": bool(is_short_cycle),
+                "outdoor_temp_change": outdoor_temp_change,
+                "outdoor_temp_min": outdoor_temp_min,
+                "outdoor_temp_max": outdoor_temp_max,
+                "cost_per_kwh_heat": cost_per_kwh_heat,
+                "dhw_stratification_range": dhw_stratification_range,
             }
         )
 
