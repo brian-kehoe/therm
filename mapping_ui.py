@@ -916,10 +916,14 @@ def render_configuration_interface(uploaded_files):
         tariff_mode_default = _infer_mode(tariff_structure_cfg)
         ts_signature = json.dumps(tariff_structure_cfg, sort_keys=True, default=str)
 
-        # If the loaded profile's tariff is different, reset the UI state.
+        # Initialise mode once
+        st.session_state.setdefault("tariff_mode", tariff_mode_default)
+
+        # If a different profile tariff was loaded, sync inputs from the loaded values
+        profile_tariff_just_loaded = False
         if st.session_state.get("tariff_mode_signature") != ts_signature:
+            profile_tariff_just_loaded = True
             st.session_state["tariff_mode"] = tariff_mode_default
-            # Also update the values for the input widgets from the loaded profile
             if isinstance(tariff_structure_cfg, dict):
                 st.session_state["flat_rate_input"] = float(tariff_structure_cfg.get("day_rate", 0.33))
                 st.session_state["day_rate_input"] = float(tariff_structure_cfg.get("day_rate", 0.33))
@@ -927,7 +931,7 @@ def render_configuration_interface(uploaded_files):
                 st.session_state["night_start_input"] = tariff_structure_cfg.get("night_start", "00:00")
                 st.session_state["night_end_input"] = tariff_structure_cfg.get("night_end", "07:00")
             else:
-                # Reset to app defaults if the loaded profile has no dict-based tariff
+                # Defaults when loading non-dict tariffs or missing data
                 st.session_state["flat_rate_input"] = 0.33
                 st.session_state["day_rate_input"] = 0.33
                 st.session_state["night_rate_input"] = 0.15
@@ -942,6 +946,18 @@ def render_configuration_interface(uploaded_files):
             help="Define how electricity cost varies over time.",
         )
         st.session_state["tariff_mode_signature"] = ts_signature
+
+        # If the user manually switches tariff mode in the UI, reset the input values to sensible defaults.
+        # This should NOT run when a profile has just been loaded, as that would overwrite the loaded values.
+        if not profile_tariff_just_loaded and st.session_state.get("tariff_mode_previous") != tariff_mode:
+            if tariff_mode == "Flat":
+                st.session_state["flat_rate_input"] = st.session_state.get("day_rate_input", 0.33)
+            elif tariff_mode == "Day/Night":
+                st.session_state["day_rate_input"] = 0.33
+                st.session_state["night_rate_input"] = 0.15
+                st.session_state["night_start_input"] = "00:00"
+                st.session_state["night_end_input"] = "07:00"
+        st.session_state["tariff_mode_previous"] = tariff_mode
 
         if tariff_mode == "Flat":
             # Ensure key exists on first run, then render widget.
@@ -1079,6 +1095,7 @@ def render_configuration_interface(uploaded_files):
         # ------------------------------------------------------------------
         st.subheader("Heat Pump Config Change History")
         st.caption("Keep a simple log of configuration changes; entries are timestamped automatically.")
+        st.caption("Keep a simple log of configuration changes. You can backdate entries if needed.")
 
         # Use a signature to detect when a new profile is loaded, and reset the history from it.
         # This is robust against reruns and loading the same file again.
@@ -1091,16 +1108,29 @@ def render_configuration_interface(uploaded_files):
 
         # Ensure keys exist for the input widgets on first run
         st.session_state.setdefault("config_history", [])
+        st.session_state.setdefault("new_change_date", datetime.now().date())
+        st.session_state.setdefault("new_change_time", datetime.now().time())
+        st.session_state.setdefault("new_change_tag", "")
         st.session_state.setdefault("new_change_note", "")
 
         def _add_change_cb() -> None:
             tag = st.session_state.get("new_change_tag", "").strip()
             note = st.session_state.get("new_change_note", "").strip()
+            change_date = st.session_state.get("new_change_date")
+            change_time = st.session_state.get("new_change_time")
+
             if not note:
                 st.session_state["config_hist_error"] = "Please enter a change note before adding."
                 return
+
+            # Combine date and time from user input
+            if change_date and change_time:
+                start_dt = datetime.combine(change_date, change_time)
+            else:
+                start_dt = datetime.now() # Fallback
+
             entry = {
-                "start": datetime.now().isoformat(timespec="seconds"),
+                "start": start_dt.isoformat(timespec="seconds"),
                 "config_tag": tag,
                 "change_note": note,
             }
@@ -1113,6 +1143,12 @@ def render_configuration_interface(uploaded_files):
             st.session_state["config_history"] = [
                 r for r in st.session_state.get("config_history", []) if str(r.get("start")) != str(start_val)
             ]
+
+        col_date, col_time = st.columns(2)
+        with col_date:
+            st.date_input("Date of change", key="new_change_date", max_value=datetime.now(), format="DD/MM/YYYY")
+        with col_time:
+            st.time_input("Time of change", key="new_change_time")
 
         st.text_input("Change tag (optional)", key="new_change_tag")
         st.text_area(
