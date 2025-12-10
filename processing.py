@@ -750,6 +750,26 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 relevant_rooms.extend(rooms_per_zone.get(z, []))
         relevant_rooms = list(set(relevant_rooms))
 
+        # Ghost pumping during DHW (zone signals + power proxy)
+        heating_during_dhw_pct = 0.0
+        heating_during_dhw_detected = False
+        ghost_pumping_power_detected = False
+        if run_type == "DHW":
+            if zone_cols:
+                zone_on_pct = (
+                    (group[zone_cols].fillna(0) > 0).any(axis=1).mean()
+                    if len(group) > 0
+                    else 0.0
+                )
+                heating_during_dhw_pct = float(zone_on_pct)
+                heating_during_dhw_detected = zone_on_pct >= 0.15
+
+            ghost_threshold = THRESHOLDS.get("ghost_power_threshold", 120)
+            if "Indoor_Power" in group.columns:
+                power_series = pd.to_numeric(group["Indoor_Power"], errors="coerce").fillna(0)
+                ghost_power_pct = float((power_series > ghost_threshold).mean()) if len(power_series) > 0 else 0.0
+                ghost_pumping_power_detected = ghost_power_pct >= 0.15
+
         # Room Deltas
         room_deltas: dict[str, float] = {}
         for r in room_cols:
@@ -794,6 +814,9 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 "relevant_rooms": relevant_rooms,
                 "immersion_kwh": group["Immersion_Power"].sum() / 60000.0,
                 "immersion_mins": group["Immersion_Active"].sum(),
+                "heating_during_dhw_pct": heating_during_dhw_pct,
+                "heating_during_dhw_detected": heating_during_dhw_detected,
+                "ghost_pumping_power_detected": ghost_pumping_power_detected,
             }
         )
 
