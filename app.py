@@ -7,6 +7,7 @@ import traceback  # NEW: for detailed debug
 import json  # NEW: for app debug bundle export
 import io     # NEW: for in-memory ZIPs
 import zipfile  # NEW: for ZIP downloads
+from pathlib import Path
 
 import view_trends
 import view_runs
@@ -206,10 +207,24 @@ with st.sidebar.expander("Data source & files", expanded=in_system_setup):
         st.session_state["csv_uploader_version"] += 1
         st.rerun()
 
-
-
-
-
+# --- Sample data download (optional helper) ---
+with st.sidebar.expander("Download Sample Data", expanded=False):
+    samples = [
+        ("grafana_numeric_longterm.csv", "sample_data/grafana_numeric_longterm.csv", "text/csv"),
+        ("grafana_state_longterm.csv", "sample_data/grafana_state_longterm.csv", "text/csv"),
+        ("therm_profile_Samsung_-_Sample_Profile.json", "sample_data/therm_profile_Samsung_-_Sample_Profile.json", "application/json"),
+    ]
+    for label, rel_path, mime in samples:
+        p = Path(rel_path)
+        if p.exists():
+            st.download_button(
+                f"Download {label}",
+                data=p.read_bytes(),
+                file_name=label,
+                mime=mime,
+            )
+        else:
+            st.caption(f"{label} (file not found)")
 # === MANUAL CACHING LOGIC ===
 def get_processed_data(files, user_config):
     """
