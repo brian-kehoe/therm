@@ -970,6 +970,8 @@ def render_configuration_interface(uploaded_files):
                 entered = ""
             ai_inputs[k] = entered
 
+        # Refresh profile_name from session to avoid stale downloads when text was just edited
+        profile_name = st.session_state.get("profile_name_input", profile_name)
         config_object = {
             "profile_name": profile_name,
             "created_at": datetime.now().isoformat(),
