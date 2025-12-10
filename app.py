@@ -886,5 +886,3 @@ else:
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
     st.info("Upload CSV files to begin.")
     st.sidebar.markdown("---")
-    with st.sidebar.expander("About therm"):
-        st.markdown("**therm v2.0** - Heat Pump Performance Analysis")
