@@ -750,11 +750,13 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 relevant_rooms.extend(rooms_per_zone.get(z, []))
         relevant_rooms = list(set(relevant_rooms))
 
-        # Ghost pumping during DHW (zone signals + power proxy)
-        heating_during_dhw_pct = 0.0
-        heating_during_dhw_detected = False
-        ghost_pumping_power_detected = False
+        # Ghost pumping during DHW
+        heating_during_dhw_pct = None
+        heating_during_dhw_detected = None
+        ghost_pumping_power_detected = None
+        ghost_detection_source = "none"
         if run_type == "DHW":
+            # Prefer direct zone signals if available
             if zone_cols:
                 zone_on_pct = (
                     (group[zone_cols].fillna(0) > 0).any(axis=1).mean()
@@ -763,12 +765,17 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 )
                 heating_during_dhw_pct = float(zone_on_pct)
                 heating_during_dhw_detected = zone_on_pct >= 0.15
-
-            ghost_threshold = THRESHOLDS.get("ghost_power_threshold", 120)
-            if "Indoor_Power" in group.columns:
+                ghost_detection_source = "zones"
+            # Fallback: indoor power proxy if no zone signals
+            elif "Indoor_Power" in group.columns:
+                ghost_threshold = THRESHOLDS.get("ghost_power_threshold", 120)
                 power_series = pd.to_numeric(group["Indoor_Power"], errors="coerce").fillna(0)
-                ghost_power_pct = float((power_series > ghost_threshold).mean()) if len(power_series) > 0 else 0.0
+                ghost_power_pct = (
+                    float((power_series > ghost_threshold).mean()) if len(power_series) > 0 else 0.0
+                )
+                heating_during_dhw_pct = ghost_power_pct
                 ghost_pumping_power_detected = ghost_power_pct >= 0.15
+                ghost_detection_source = "power"
 
         # Room Deltas
         room_deltas: dict[str, float] = {}
@@ -817,6 +824,7 @@ def detect_runs(df: pd.DataFrame, user_config: dict | None = None) -> list[dict]
                 "heating_during_dhw_pct": heating_during_dhw_pct,
                 "heating_during_dhw_detected": heating_during_dhw_detected,
                 "ghost_pumping_power_detected": ghost_pumping_power_detected,
+                "ghost_detection_source": ghost_detection_source,
             }
         )
 

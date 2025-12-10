@@ -238,28 +238,34 @@ def render_run_inspector(df, runs_list):
     # ------------------------------------------------------------------
     with tab2:
         if selected_run["run_type"] == "DHW":
-            is_ghost_sensor = selected_run.get(
-                "heating_during_dhw_detected", False
+            detection_source = selected_run.get("ghost_detection_source", "none")
+            is_ghost_sensor = (
+                selected_run.get("heating_during_dhw_detected")
+                if detection_source == "zones"
+                else None
             )
-            is_ghost_power = selected_run.get(
-                "ghost_pumping_power_detected", False
-            )
-
-            state_sensor = "⚠️ **Detected**" if is_ghost_sensor else "✅ Clear"
-            state_power = "⚠️ **Detected**" if is_ghost_power else "✅ Clear"
-
-            st.markdown(
-                f"**Ghost Pumping Check:**   Sensors: {state_sensor}   |   "
-                f"Power Proxy: {state_power}"
+            is_ghost_power = (
+                selected_run.get("ghost_pumping_power_detected")
+                if detection_source == "power"
+                else None
             )
 
-            if is_ghost_sensor or is_ghost_power:
-                st.caption(
-                    "⚠️ *Warning: Heating zones appear to be active during "
-                    "Hot Water generation. This reduces efficiency.*"
-                )
+            if detection_source != "none":
+                state_sensor = "⚠️ **Detected**" if is_ghost_sensor else "✅ Clear"
+                state_power = "⚠️ **Detected**" if is_ghost_power else "✅ Clear"
 
-            st.divider()
+                if detection_source == "zones":
+                    st.markdown(f"**Ghost Pumping Check (Zones):** {state_sensor}")
+                elif detection_source == "power":
+                    st.markdown(f"**Ghost Pumping Check (Indoor Power):** {state_power}")
+
+                if is_ghost_sensor or is_ghost_power:
+                    st.caption(
+                        "⚠️ *Warning: Heating zones appear to be active during "
+                        "Hot Water generation. This reduces efficiency.*"
+                    )
+
+                st.divider()
 
         is_dhw = selected_run["run_type"] == "DHW"
         num_rows = 4 if is_dhw else 3

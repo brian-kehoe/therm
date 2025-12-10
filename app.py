@@ -88,16 +88,24 @@ st.markdown(
         padding-bottom: 0.5rem;
         box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
-    /* Reduce spacing after radio button in sidebar */
-    [data-testid="stSidebar"] [data-testid="stRadio"] {
+    /* Reduce spacing after radio button in sidebar - but NOT in expanders */
+    [data-testid="stSidebar"] > div > div > [data-testid="stRadio"] {
         margin-bottom: -2rem !important;
     }
-    /* Reduce spacing around all h3 elements (subheaders) */
-    h3 {
+    /* Restore normal spacing for radio buttons inside sidebar expanders */
+    [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stRadio"] {
+        margin-bottom: 0 !important;
+    }
+    /* Reduce spacing before Global Stats in sidebar */
+    [data-testid="stSidebar"] .global-stats {
+        margin-top: -5rem !important;
+    }
+    /* Reduce spacing around all h3 elements (subheaders) - but NOT in sidebar */
+    .main h3 {
         margin-bottom: -1rem !important;
     }
-    /* Reduce spacing around Plotly charts */
-    [data-testid="stPlotlyChart"] {
+    /* Reduce spacing around Plotly charts - only in main content */
+    .main [data-testid="stPlotlyChart"] {
         margin-top: -1rem !important;
         margin-bottom: -1rem !important;
     }
@@ -579,7 +587,7 @@ if uploaded_files:
                         unsafe_allow_html=True,
                     )
 
-                    st.markdown("<div class='global-stats' style='margin-top: -2rem;'>", unsafe_allow_html=True)
+                    st.markdown("<div class='global-stats'>", unsafe_allow_html=True)
                     st.markdown("### Global Stats")
 
                     # Runs Detected as headline
