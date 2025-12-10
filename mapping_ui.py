@@ -1051,7 +1051,9 @@ def render_configuration_interface(uploaded_files):
         # ------------------------------------------------------------------
         st.subheader("Heat Pump Config Change History")
         st.caption("Keep a simple log of configuration changes; entries are timestamped automatically.")
-        st.session_state.setdefault("config_history", [])
+        # Ensure config_history is initialized from defaults (including loaded profile) if not already set in-session
+        if "config_history" not in st.session_state:
+            st.session_state["config_history"] = list(defaults.get("config_history") or [])
         st.session_state.setdefault("new_change_tag", "")
         st.session_state.setdefault("new_change_note", "")
 
