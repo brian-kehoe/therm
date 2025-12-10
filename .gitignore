@@ -25,3 +25,7 @@ testing/artifacts/therm_debug_*/*
 testing/sample_data/ha_input_longterm.csv
 testing/sample_data/grafana_numeric_longterm.csv
 testing/sample_data/grafana_state_longterm.csv
+assets/sample_files/Heat Pump Export Data - Numeric-data-10_12_2025 14_10_03.csv
+.gitignore
+.gitignore
+.gitignore
