@@ -218,11 +218,8 @@ def get_processed_data(files, user_config):
 
     import time
     def _log(msg: str) -> None:
-        try:
-            import sys
-            sys.stdout.write(f"[process] {msg}\n")
-        except Exception:
-            pass
+        # Silenced console logging to reduce noise in terminal output.
+        return
 
     # ------------------------------------------------------------------
     # 1. Decide which data source is being used for this run
