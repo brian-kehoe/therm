@@ -448,6 +448,7 @@ def render_configuration_interface(uploaded_files):
         # ------------------------------------------------------------------
         # 1. Critical Sensors
         # ------------------------------------------------------------------
+        st.subheader("1. Critical Sensors")
         for key, d in REQUIRED_SENSORS.items():
             s, u = render_sensor_row(
                 d["label"],
