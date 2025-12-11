@@ -8,13 +8,18 @@ from datetime import datetime, timezone
 import json
 import pandas as pd
 
-from config import CALC_VERSION
+from config import CALC_VERSION, AI_SYSTEM_CONTEXT
 from utils import safe_div
 
 
 def _build_system_context(user_config: dict | None, include_heating_note: bool) -> str:
-    """Compose AI system context from user-provided freetext; add DHW note only if detected."""
+    """Compose AI system context from the default prompt plus user-provided freetext."""
     parts: list[str] = []
+
+    base = (AI_SYSTEM_CONTEXT or "").strip()
+    if base:
+        parts.append(base)
+
     if isinstance(user_config, dict):
         ai_ctx = user_config.get("ai_context") or {}
         for key in ("hp_model", "property_context", "operational_goals"):
@@ -40,7 +45,6 @@ def _build_system_context(user_config: dict | None, include_heating_note: bool) 
             "Heating during DHW detected: zone pumps active during DHW can cause return mixing and low COP; attribute DHW efficiency penalties accordingly."
         )
     return "\n".join(parts) if parts else "No additional system context supplied."
-
 
 def _build_tariff_summary(user_config: dict | None) -> dict:
     """Return a structured tariff summary for AI exports."""
