@@ -1,4 +1,4 @@
-**therm**
+### **therm**
 ### (Thermal Health & Efficiency Reporting Module)
 
 **therm** is a modular, forensic analytics engine designed to audit the performance of Heat Pumps (initially developed for Samsung Gen 6 Heat Pump). 
